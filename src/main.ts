@@ -394,6 +394,13 @@ class Game {
       this.camPos.lerp(target, 1 - Math.exp(-5 * dt));
       this.camera.position.set(this.camPos.x, 110, this.camPos.z - 52);
       this.camera.lookAt(this.camPos.x, 0, this.camPos.z);
+      // crash/impact screen shake
+      const trauma = this.race.shakeTrauma;
+      if (trauma > 0) {
+        const s = trauma * trauma * 7;
+        this.camera.position.x += (Math.random() - 0.5) * s;
+        this.camera.position.z += (Math.random() - 0.5) * s;
+      }
       if (!skipRender) {
         if (this.composer) this.composer.render();
         else this.renderer.render(this.race.scene, this.camera);

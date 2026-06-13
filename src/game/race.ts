@@ -155,6 +155,10 @@ export class Race {
   readonly track: BuiltTrack;
   /** debug/testing: when true the player car is AI-driven */
   autopilot = false;
+  /** camera shake trauma 0..1, read by the renderer */
+  shakeTrauma = 0;
+  private skids: THREE.Mesh[] = [];
+  private skidMat = new THREE.MeshBasicMaterial({ color: 0x14141a, transparent: true, opacity: 0.4, depthWrite: false });
   private racers: Racer[] = [];
   private missiles: Missile[] = [];
   private mines: Mine[] = [];
@@ -500,6 +504,7 @@ export class Race {
     }
     this.updateAnimals(dt);
     this.updateLorry(dt);
+    this.shakeTrauma = Math.max(0, this.shakeTrauma - dt * 1.6);
 
     this.resolveCarCollisions(dt);
     this.updateMissiles(dt);
@@ -730,6 +735,19 @@ export class Race {
     while (slip < -Math.PI) slip += Math.PI * 2;
     r.mesh.rotation.y = r.heading + slip * 0.25;
     r.mesh.rotation.z = THREE.MathUtils.clamp(-slip * 0.3, -0.18, 0.18);
+
+    // juice (player only, for performance): skid marks when drifting, dust off-road/boosting
+    if (r.cfg.isPlayer && !r.finished) {
+      const speed = Math.abs(r.speed);
+      if (!r.offTrack && r.crash <= 0 && (Math.abs(slip) > 0.32 || r.slip > 0) && speed > 14) {
+        this.laySkid(r);
+      }
+      if (speed > 10 && (r.offTrack || r.boosting) && Math.random() < 0.6) {
+        const back = new THREE.Vector3(Math.sin(r.heading), 0, Math.cos(r.heading)).multiplyScalar(-1.8);
+        const col = r.offTrack ? 0xc8b98a : 0x9fd8ff;
+        this.spawnDust(r.pos.clone().add(back), col, r.boosting ? 0.5 : 0.8);
+      }
+    }
   }
 
   private updateProgress(r: Racer): void {
@@ -910,9 +928,11 @@ export class Race {
     r.boosting = false;
     this.spawnExplosion(r.pos.clone(), 0xff5a3c);
     this.spawnSparks(r.pos.clone());
+    for (let i = 0; i < 5; i++) this.spawnDust(r.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2, 0, (Math.random() - 0.5) * 2)), 0xb0a89a, 0.9);
     this.applyDamage(r, 8, false);
     if (r.cfg.isPlayer) {
       this.sfx('wreck');
+      this.addShake(0.9);
       this.message = '💥 CRASH!';
       this.messageTime = 1.4;
     }
@@ -946,6 +966,9 @@ export class Race {
     mesh.position.copy(pos);
     this.scene.add(mesh);
     this.effects.push({ mesh, life: 0.45, maxLife: 0.45, grow: 14 });
+    // shake the camera when the blast is near the player
+    const d = this.player.pos.distanceTo(pos);
+    if (d < 30) this.addShake(0.5 * (1 - d / 30));
   }
 
   private spawnSparks(pos: THREE.Vector3): void {
@@ -957,6 +980,40 @@ export class Race {
     mesh.position.copy(pos);
     this.scene.add(mesh);
     this.effects.push({ mesh, life: 0.22, maxLife: 0.22, grow: 6 });
+  }
+
+  private spawnDust(pos: THREE.Vector3, color: number, size = 0.7): void {
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(size, 6, 5),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthWrite: false })
+    );
+    mesh.position.copy(pos);
+    mesh.position.y = 0.5;
+    this.scene.add(mesh);
+    this.effects.push({ mesh, life: 0.4 + Math.random() * 0.2, maxLife: 0.55, grow: 8 });
+  }
+
+  // Lay a pair of tyre marks under the rear wheels; recycled into a capped pool.
+  private laySkid(r: Racer): void {
+    const back = new THREE.Vector3(Math.sin(r.heading), 0, Math.cos(r.heading)).multiplyScalar(-1.4);
+    for (const side of [0.85, -0.85]) {
+      const lat = new THREE.Vector3(Math.cos(r.heading), 0, -Math.sin(r.heading)).multiplyScalar(side);
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 1.1), this.skidMat);
+      m.rotation.x = -Math.PI / 2;
+      m.rotation.z = -r.heading;
+      m.position.copy(r.pos).add(back).add(lat);
+      m.position.y = 0.05;
+      this.scene.add(m);
+      this.skids.push(m);
+    }
+    while (this.skids.length > 260) {
+      const old = this.skids.shift();
+      if (old) this.scene.remove(old);
+    }
+  }
+
+  private addShake(amount: number): void {
+    this.shakeTrauma = Math.min(1, this.shakeTrauma + amount);
   }
 
   private updateEffects(dt: number): void {

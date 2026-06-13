@@ -11,6 +11,9 @@ export const PLAYER_CAR_MODELS: Record<string, string> = {
   'rival-x': 'race',
   'kolt-47': 'sedan-sports',
   'vex-77': 'race-future',
+  'hex-9': 'hatchback-sports',
+  'nitrous': 'suv',
+  'ghost': 'race-future',
 };
 
 /** Rival id -> model file */
@@ -61,7 +64,19 @@ export function hasModel(name: string): boolean {
 function rawClone(name: string): THREE.Group | null {
   const src = cache.get(name);
   if (!src) return null;
-  return src.clone(true);
+  const clone = src.clone(true);
+  // Object3D.clone shares geometry/material by reference; give each clone its own
+  // so a race's dispose() never frees the shared cached source assets.
+  clone.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh) {
+      m.geometry = m.geometry.clone();
+      m.material = Array.isArray(m.material)
+        ? m.material.map((mat) => mat.clone())
+        : (m.material as THREE.Material).clone();
+    }
+  });
+  return clone;
 }
 
 /**

@@ -265,28 +265,6 @@ function buildDashes(samples: TrackSample[], halfW: number, color: number, y: nu
   return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color }));
 }
 
-// Open (non-looping) vertical wall strip alongside a run of samples.
-function buildWall(
-  seg: TrackSample[], lateral: number, y0: number, y1: number, color: number
-): THREE.Mesh {
-  const n = seg.length;
-  const positions = new Float32Array(n * 2 * 3);
-  const indices: number[] = [];
-  for (let i = 0; i < n; i++) {
-    const s = seg[i];
-    const base = s.pos.clone().addScaledVector(s.normal, lateral);
-    positions.set([base.x, y0, base.z, base.x, y1, base.z], i * 6);
-    if (i < n - 1) {
-      indices.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 2, i * 2 + 1, i * 2 + 3);
-    }
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-  return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide }));
-}
-
 // Mountain pass: the road cuts through a rocky massif. Tall jagged rock masses
 // flank both sides (reading as a mountain from above), with a stone portal arch
 // at each end marking the tunnel mouth. The road itself stays open to the camera

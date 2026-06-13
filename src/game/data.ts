@@ -40,6 +40,24 @@ export const CARS: CarSpec[] = [
     base: { speed: 8.5, accel: 7.5, handling: 7.5, armour: 6.5, boost: 8.0 },
     blurb: 'Overdrive-grade machine.',
   },
+  {
+    id: 'hex-9', name: 'Hex-9', tier: 3, price: 210000,
+    color: 0xe0992e, accent: 0x1a1a1a,
+    base: { speed: 8.0, accel: 8.5, handling: 8.0, armour: 7.0, boost: 7.5 },
+    blurb: 'Launch-tuned brawler.',
+  },
+  {
+    id: 'nitrous', name: 'Nitrous', tier: 4, price: 320000,
+    color: 0x2a2e38, accent: 0xff2975,
+    base: { speed: 9.2, accel: 8.0, handling: 8.0, armour: 7.5, boost: 9.0 },
+    blurb: 'Top-tier nitro monster.',
+  },
+  {
+    id: 'ghost', name: 'Ghost', tier: 5, price: 480000,
+    color: 0x101218, accent: 0x2de2e6,
+    base: { speed: 9.6, accel: 9.0, handling: 9.2, armour: 8.0, boost: 9.4 },
+    blurb: 'The legend. Unmatched.',
+  },
 ];
 
 export interface UpgradeSpec {
@@ -178,6 +196,30 @@ export const TRACKS: TrackDef[] = [
     ],
     theme: NIGHT,
   },
+  {
+    id: 'canyon-run', name: 'Canyon Run', subtitle: 'Desert Pass',
+    laps: 5, width: 10, scale: 1.45,
+    difficulty: 'MEDIUM',
+    tunnel: [0.48, 0.6],
+    points: [
+      [0, 0], [65, -12], [105, 20], [88, 65], [120, 105],
+      [100, 150], [45, 138], [12, 100], [-42, 128], [-92, 100],
+      [-78, 52], [-112, 14], [-72, -22], [-32, -8],
+    ],
+    theme: DESERT,
+  },
+  {
+    id: 'frostbite-loop', name: 'Frostbite Loop', subtitle: 'Alpine Sprint',
+    laps: 6, width: 9, scale: 1.5,
+    difficulty: 'HARD',
+    bridges: [0.35, 0.72],
+    points: [
+      [0, 0], [55, -22], [98, 8], [80, 50], [122, 78],
+      [100, 122], [48, 108], [28, 145], [-28, 132], [-50, 90],
+      [-100, 100], [-118, 54], [-76, 28], [-90, -18], [-42, -32],
+    ],
+    theme: SNOW,
+  },
 ];
 
 export interface RivalDef {
@@ -201,11 +243,11 @@ export const PLAYER_CAR_NUM = '47';
 export const PLAYER_NAME = 'YOU';
 
 export const CUP = {
-  name: 'AUTUMN CUP 2026',
-  trackIds: ['dockyard-dash', 'forest-run', 'glacier-gate', 'neon-boulevard'],
+  name: 'OVERDRIVE CUP 2026',
+  trackIds: ['dockyard-dash', 'forest-run', 'canyon-run', 'glacier-gate', 'frostbite-loop', 'neon-boulevard'],
   pointsByPosition: [10, 8, 6, 4, 2, 1],
   cashByPosition: [6000, 4200, 3000, 2200, 1500, 1000],
-  winBonus: 15000, // cup winner bonus
+  winBonus: 25000, // cup winner bonus
 };
 
 export function effectiveStats(car: CarSpec, upg: Record<UpgradeId, number>): CarStats {
