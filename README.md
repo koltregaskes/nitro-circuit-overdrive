@@ -1,8 +1,10 @@
 # Nitro Circuit Overdrive
 
-A 2.5D top-down / near-isometric arcade racer vertical slice. Original game — no
-copyrighted assets. TypeScript + Vite + Three.js, all graphics procedural
-(code-generated meshes, no asset files).
+**▶ Play now: https://koltregaskes.github.io/nitro-circuit-overdrive/**
+
+A 2.5D top-down / near-isometric arcade racer. Original game — no copyrighted
+assets (3D models are Kenney CC0). TypeScript + Vite + Three.js. Auto-deploys to
+GitHub Pages on every push to `main`.
 
 Inspired by the *feel* of art-of-rally-style readable top-down racing and the
 competition DNA of classic top-down racers: cups, standings, garage upgrades,
