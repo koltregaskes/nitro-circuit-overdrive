@@ -74,10 +74,11 @@ class Game {
 
   constructor() {
     const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    // cap pixel ratio at 1.5 — 4K/Retina at 2x quadruples fragment cost for little gain
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 600);
     this.profile = loadProfile();
     this.audio.volume = this.profile.settings.volume;
@@ -93,7 +94,7 @@ class Game {
       restartRace: () => this.restartRace(),
       quitRace: () => this.forfeitRace(),
       applySettings: () => this.applySettings(),
-      sfx: (n) => { this.audio.unlock(); this.audio.play(n); },
+      sfx: (n) => this.handleSfx(n),
       profileReset: () => {
         this.profile = resetProfile();
         this.screens.setProfile(this.profile);
@@ -124,7 +125,8 @@ class Game {
     const w = window.innerWidth, h = window.innerHeight;
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(scene, this.camera));
-    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.4, 0.5, 0.82);
+    // bloom at half resolution — the glow is soft so the downscale is invisible but ~4x cheaper
+    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.4, 0.5, 0.82);
     this.composer.addPass(this.bloomPass);
     this.composer.addPass(new OutputPass());
     this.composer.setSize(w, h);
@@ -181,6 +183,13 @@ class Game {
     this.updateCameraFrustum();
   }
 
+  /** Route a sound name: 'voice:x' plays an mp3 sample, else a procedural sfx. */
+  private handleSfx(n: string): void {
+    this.audio.unlock();
+    if (n.startsWith('voice:')) { this.audio.playSample('vo-' + n.slice(6) + '.mp3'); return; }
+    this.audio.play(n);
+  }
+
   private toState(s: GameState): void {
     if ((this.state === 'race' || this.state === 'results') && s !== 'race') {
       this.audio.stopEngine();
@@ -191,6 +200,8 @@ class Game {
     this.state = s;
     this.paused = false;
     this.tutorialActive = false;
+    // menu music plays on all front-end screens, off during the race
+    this.audio.startMusic();
     switch (s) {
       case 'menu': this.screens.showMenu(); break;
       case 'tournament': this.screens.showTournament(); break;
@@ -250,7 +261,11 @@ class Game {
       track,
       this.buildRacerConfigs(raceIndex),
       (results) => this.onRaceFinished(results),
-      (n, v) => this.audio.play(n, v),
+      (n, v) => {
+        this.audio.play(n, v);
+        if (n === 'go') this.audio.playSample('vo-go.mp3');
+        else if (n === 'finalLap') this.audio.playSample('vo-finallap.mp3');
+      },
       { weapons: p.settings.weapons }
     );
 
@@ -259,6 +274,7 @@ class Game {
     this.screens.clear();
     this.hud.mount(track.minimap, p.bestTimes[trackDef.id] ?? null);
     this.audio.unlock();
+    this.audio.stopMusic();
     this.audio.startEngine();
     // snap camera to start and show real HUD values immediately
     this.camPos.copy(this.race.playerPos);

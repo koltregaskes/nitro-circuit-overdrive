@@ -27,10 +27,85 @@ export class GameAudio {
   setVolume(v: number): void {
     this.volume = v;
     if (this.master) this.master.gain.value = v;
+    for (const a of this.samples.values()) a.volume = Math.min(1, v * 1.2);
+    if (this.musicGain && this.ctx) this.musicGain.gain.setTargetAtTime(v * 0.18, this.ctx.currentTime, 0.1);
   }
 
   unlock(): void {
     this.ensure();
+  }
+
+  // ---- AI-generated voice/sfx samples (mp3 under public/audio) ----
+  private samples = new Map<string, HTMLAudioElement>();
+
+  playSample(file: string): void {
+    try {
+      let a = this.samples.get(file);
+      if (!a) {
+        a = new Audio(`${import.meta.env.BASE_URL}audio/${file}`);
+        a.preload = 'auto';
+        this.samples.set(file, a);
+      }
+      a.volume = Math.min(1, this.volume * 1.2);
+      a.currentTime = 0;
+      void a.play().catch(() => { /* autoplay gate — ignored */ });
+    } catch { /* no audio */ }
+  }
+
+  // ---- procedural synthwave menu music loop (no external asset) ----
+  private musicGain: GainNode | null = null;
+  private musicTimer: number | null = null;
+
+  startMusic(): void {
+    const ctx = this.ensure();
+    if (!ctx || !this.master || this.musicTimer !== null) return;
+    this.musicGain = ctx.createGain();
+    this.musicGain.gain.value = this.volume * 0.18;
+    this.musicGain.connect(this.master);
+
+    // Am–F–C–G vibe: bass roots + arpeggio over a 4-bar loop
+    const roots = [110, 87.31, 130.81, 98];                 // A2 F2 C3 G2
+    const arps = [
+      [220, 261.63, 329.63], [174.61, 220, 261.63],
+      [261.63, 329.63, 392], [196, 246.94, 293.66],
+    ];
+    let step = 0;
+    const beat = 0.26;
+    const tick = () => {
+      if (!this.musicGain || !this.ctx) return;
+      const bar = Math.floor(step / 4) % 4;
+      const t = this.ctx.currentTime;
+      if (step % 4 === 0) this.note(this.musicGain, 'triangle', roots[bar], beat * 4, 0.5);
+      const arp = arps[bar];
+      this.note(this.musicGain, 'sawtooth', arp[step % arp.length] * 2, beat * 0.9, 0.16);
+      step++;
+    };
+    tick();
+    this.musicTimer = window.setInterval(tick, beat * 1000);
+  }
+
+  stopMusic(): void {
+    if (this.musicTimer !== null) { clearInterval(this.musicTimer); this.musicTimer = null; }
+    if (this.musicGain) {
+      try { this.musicGain.disconnect(); } catch { /* already gone */ }
+      this.musicGain = null;
+    }
+  }
+
+  private note(dest: GainNode, type: OscillatorType, freq: number, dur: number, peak: number): void {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    o.type = type;
+    o.frequency.value = freq;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g);
+    g.connect(dest);
+    o.start(t);
+    o.stop(t + dur + 0.05);
   }
 
   startEngine(): void {

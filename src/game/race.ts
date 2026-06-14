@@ -205,13 +205,14 @@ export class Race {
     const sun = new THREE.DirectionalLight(0xfff2dc, 1.6);
     sun.position.set(60, 120, 40);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -120;
-    sun.shadow.camera.right = 120;
-    sun.shadow.camera.top = 120;
-    sun.shadow.camera.bottom = -120;
+    // tighter map + frustum around the player: fewer casters, crisper, far cheaper
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.left = -70;
+    sun.shadow.camera.right = 70;
+    sun.shadow.camera.top = 70;
+    sun.shadow.camera.bottom = -70;
     sun.shadow.camera.near = 10;
-    sun.shadow.camera.far = 400;
+    sun.shadow.camera.far = 320;
     sun.shadow.bias = -0.0004;
     this.scene.add(sun);
     this.scene.add(sun.target);
@@ -1006,9 +1007,9 @@ export class Race {
       this.scene.add(m);
       this.skids.push(m);
     }
-    while (this.skids.length > 260) {
+    while (this.skids.length > 150) {
       const old = this.skids.shift();
-      if (old) this.scene.remove(old);
+      if (old) { this.scene.remove(old); old.geometry.dispose(); }
     }
   }
 

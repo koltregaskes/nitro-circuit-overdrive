@@ -111,6 +111,15 @@ export class Screens {
 
   clear(): void { this.root.innerHTML = ''; }
 
+  // Apply an AI-generated background image under a dark gradient for legibility.
+  private applyBg(el: HTMLElement, file: string, topAlpha = 0.72, botAlpha = 0.9): void {
+    const base = import.meta.env.BASE_URL;
+    el.style.backgroundImage =
+      `linear-gradient(rgba(8,10,18,${topAlpha}), rgba(8,10,18,${botAlpha})), url(${base}ui/${file})`;
+    el.style.backgroundSize = 'cover';
+    el.style.backgroundPosition = 'center';
+  }
+
   private btn(label: string, cls: string, fn: () => void, disabled = false): HTMLButtonElement {
     const b = document.createElement('button');
     b.className = 'btn ' + cls;
@@ -139,6 +148,7 @@ export class Screens {
     this.clear();
     const div = document.createElement('div');
     div.className = 'screen-root';
+    this.applyBg(div, 'menu-bg.png', 0.4, 0.82);
     div.innerHTML = `
       <div style="flex:1"></div>
       <div class="logo">Nitro Circuit<span class="sub">Overdrive</span></div>
@@ -174,6 +184,7 @@ export class Screens {
     const p = this.profile;
     const div = document.createElement('div');
     div.className = 'screen-root';
+    this.applyBg(div, 'cup-bg.png');
     this.topbar(div, 'TOURNAMENT');
 
     const sub = document.createElement('div');
@@ -243,6 +254,7 @@ export class Screens {
     const p = this.profile;
     const div = document.createElement('div');
     div.className = 'screen-root';
+    this.applyBg(div, 'garage-bg.png');
     this.topbar(div, 'GARAGE');
 
     const car = CARS.find((c) => c.id === p.equipped)!;
@@ -489,7 +501,7 @@ export class Screens {
         ${won ? '🏆 RACE WON!' : `RACE FINISHED — P${playerRow.position}`}
       </h2>
       <div class="muted" style="margin:6px 0 18px">+${pointsEarned} cup points · <span class="green">${money(cashEarned)}</span> prize money</div>`;
-    if (won) { this.confetti(div); this.actions.sfx('fanfare'); }
+    if (won) { this.confetti(div); this.actions.sfx('fanfare'); this.actions.sfx('voice:win'); }
     const panel = document.createElement('div');
     panel.className = 'panel';
     panel.style.width = '640px';
@@ -565,7 +577,8 @@ export class Screens {
         ${playerRank === 1 ? `${CUP.name} CHAMPION!` : `CUP COMPLETE — P${playerRank}`}</h2>
       <div class="muted" style="margin:8px 0 20px">${
         playerRank === 1 ? `Winner bonus: <span class="green">${money(CUP.winBonus)}</span>` : 'Better luck next season.'}</div>`;
-    if (playerRank === 1) { this.confetti(div); this.actions.sfx('fanfare'); }
+    if (playerRank === 1) { this.confetti(div); this.actions.sfx('fanfare'); this.actions.sfx('voice:win'); }
+    else this.actions.sfx('voice:lose');
     const panel = document.createElement('div');
     panel.className = 'panel';
     panel.style.width = '480px';

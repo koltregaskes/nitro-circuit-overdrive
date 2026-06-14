@@ -404,7 +404,7 @@ function addDecor(
   const placed: THREE.Vector3[] = [];
 
   let attempts = 0;
-  while (placed.length < 220 && attempts < 2500) {
+  while (placed.length < 140 && attempts < 2000) {
     attempts++;
     const p = new THREE.Vector3((rng() - 0.5) * 2 * bounds, 0, (rng() - 0.5) * 2 * bounds);
     // reject if too close to road (coarse check every 4th sample)
