@@ -150,6 +150,21 @@ export type RacePhase = 'countdown' | 'racing' | 'finished';
 
 const GRID_COLORS_FALLBACK = 0x888888;
 
+// Vertical two-stop gradient used as the scene background (cheap "sky").
+function makeSkyGradient(top: THREE.Color, bottom: THREE.Color): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 4; c.height = 256;
+  const ctx = c.getContext('2d')!;
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#' + top.getHexString());
+  grad.addColorStop(1, '#' + bottom.getHexString());
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 4, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 export class Race {
   readonly scene: THREE.Scene;
   readonly track: BuiltTrack;
@@ -194,8 +209,11 @@ export class Race {
     this.onFinish = onFinish;
     this.sfx = sfx;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(track.def.theme.fog);
-    this.scene.fog = new THREE.Fog(track.def.theme.fog, 180, 420);
+    // vertical gradient sky + fog matched to the horizon colour (the "postcard" look)
+    const fog = new THREE.Color(track.def.theme.fog);
+    const skyTop = fog.clone().lerp(new THREE.Color(0x0a1020), 0.35);
+    this.scene.background = makeSkyGradient(skyTop, fog);
+    this.scene.fog = new THREE.Fog(fog.getHex(), 150, 380);
     this.scene.add(track.group);
 
     const ambient = new THREE.AmbientLight(0xcfe0ff, 0.55);
@@ -324,9 +342,9 @@ export class Race {
   }
 
   private eventAnimal(): void {
-    const leader = this.sortedRacers()[0];
     const n = this.track.samples.length;
-    const s = this.track.samples[(leader.sampleIdx + 75) % n];
+    // spawn just ahead of the PLAYER so they actually witness it
+    const s = this.track.samples[(this.player.sampleIdx + 34) % n];
     const side = Math.random() < 0.5 ? 1 : -1;
     const start = s.pos.clone().addScaledVector(s.normal, side * (this.track.halfWidth + 9));
     const mesh = buildAnimalMesh();
@@ -344,9 +362,9 @@ export class Race {
   // and spills oil + debris — all animated. (updateLorry drives the phases.)
   private eventLorry(): void {
     this.lorryDone = true;
-    const leader = this.sortedRacers()[0];
     const n = this.track.samples.length;
-    const baseIdx = (leader.sampleIdx + 110) % n;
+    // ahead of the player, close enough to watch it drive in, skid and tip
+    const baseIdx = (this.player.sampleIdx + 48) % n;
     const s = this.track.samples[baseIdx];
     const side = Math.random() < 0.5 ? 1 : -1;
     // crash point sits across the racing line; truck starts well off the verge
@@ -386,12 +404,14 @@ export class Race {
       if (k > 0.7) L.mesh.rotation.y = L.headingY + Math.sin(L.t * 30) * 0.05 * (k - 0.7) / 0.3;
       if (k >= 1) { L.phase = 'tip'; L.t = 0; this.sfx('wreck'); this.spawnSparks(L.crashPos.clone()); }
     } else if (L.phase === 'tip') {
-      // roll onto its side over 0.7s with a small bounce
-      const k = Math.min(1, L.t / 0.7);
+      // skid, spin and roll onto its side over 0.9s with a bounce + dust
+      const k = Math.min(1, L.t / 0.9);
       const over = 1 - (1 - k) * (1 - k);
-      L.mesh.rotation.z = L.side * 1.15 * over;
-      L.mesh.position.y = 1.1 + Math.sin(over * Math.PI) * 0.5;
-      if (k >= 1) { L.phase = 'spill'; L.t = 0; this.spawnExplosion(L.crashPos.clone(), 0xffc83d); }
+      L.mesh.rotation.z = L.side * 1.2 * over;
+      L.mesh.rotation.y = L.headingY + L.side * 2.0 * over; // jackknife spin
+      L.mesh.position.y = 1.1 + Math.sin(over * Math.PI) * 0.7;
+      if (Math.random() < 0.5) this.spawnDust(L.crashPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 0, (Math.random() - 0.5) * 4)), 0xb0a89a, 1.0);
+      if (k >= 1) { L.phase = 'spill'; L.t = 0; this.spawnExplosion(L.crashPos.clone(), 0xffc83d); this.addShake(0.6); }
     } else if (L.phase === 'spill') {
       // lay down oil slicks + debris progressively along the road
       L.spillT += dt;
@@ -718,6 +738,19 @@ export class Race {
       const pull = (Math.abs(lateral) - limit) * 4;
       r.pos.addScaledVector(s.normal, -Math.sign(lateral) * pull * dt * 4);
       r.speed *= Math.pow(0.5, dt * 2);
+    }
+    // firm tunnel walls: hard track limit at the road edge so the pass is drivable
+    const tun = this.track.def.tunnel;
+    if (tun) {
+      const frac = r.sampleIdx / this.track.samples.length;
+      if (frac >= tun[0] && frac <= tun[1]) {
+        const wall = this.track.halfWidth + 0.7;
+        if (Math.abs(lateral) > wall) {
+          r.pos.copy(s.pos).addScaledVector(s.normal, Math.sign(lateral) * wall);
+          r.speed *= Math.pow(0.6, dt * 6);
+          if (r.cfg.isPlayer && Math.abs(r.speed) > 16 && Math.random() < 0.3) this.spawnSparks(r.pos.clone());
+        }
+      }
     }
 
     // wrong way detection

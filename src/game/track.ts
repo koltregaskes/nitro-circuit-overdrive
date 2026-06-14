@@ -237,7 +237,8 @@ function buildKerb(
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.setIndex(indices);
   geo.computeVertexNormals();
-  return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  // unlit + vivid so the kerbs read as glowing neon edges and feed the bloom pass
+  return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
 }
 
 function buildDashes(samples: TrackSample[], halfW: number, color: number, y: number): THREE.Mesh {
@@ -265,64 +266,78 @@ function buildDashes(samples: TrackSample[], halfW: number, color: number, y: nu
   return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color }));
 }
 
-// Mountain pass: the road cuts through a rocky massif. Tall jagged rock masses
-// flank both sides (reading as a mountain from above), with a stone portal arch
-// at each end marking the tunnel mouth. The road itself stays open to the camera
-// so the player's car is always visible — a cutaway, not a roofed box.
+// Mountain pass: the road threads a rocky massif. Continuous BARRIER WALLS at the
+// road edge are the visible track limits (with an emissive cap that glows under
+// bloom for readability); the rock mountain sits well outside them. Road stays
+// fully open to the camera so cars/the truck are always visible.
 function buildMountainPass(
   seg: TrackSample[], halfWidth: number, def: TrackDef, rng: () => number
 ): THREE.Group {
   const g = new THREE.Group();
   const n = seg.length;
-  // rocky earth tones, slightly tinted toward the theme so snow/desert read right
   const rockBase = new THREE.Color(0x6b6258).lerp(new THREE.Color(def.theme.ground), 0.25);
   const rockMat = new THREE.MeshLambertMaterial({ color: rockBase.getHex() });
-  const rockDark = new THREE.MeshLambertMaterial({ color: rockBase.clone().multiplyScalar(0.7).getHex() });
+  const rockDark = new THREE.MeshLambertMaterial({ color: rockBase.clone().multiplyScalar(0.65).getHex() });
+  const wallMat = new THREE.MeshLambertMaterial({ color: 0x3a3f4a });
+  const capMat = new THREE.MeshBasicMaterial({ color: def.theme.stripeB });
   const rockGeo = new THREE.IcosahedronGeometry(1, 0);
 
-  const inner = halfWidth + 3.2; // rock face starts clear of the racing line
-
-  // boulder masses along both walls; height swells toward the middle (mountain profile)
-  for (let i = 1; i < n - 1; i += 2) {
-    const s = seg[i];
-    const t = i / (n - 1);
-    const profile = Math.sin(t * Math.PI); // 0 at mouths, 1 mid-pass
+  const wallAt = halfWidth + 0.7; // track limit
+  const wallH = 1.9;
+  for (let i = 0; i < n - 1; i++) {
+    const s0 = seg[i], s1 = seg[i + 1];
     for (const side of [1, -1]) {
-      const clusters = 2 + Math.floor(rng() * 2);
-      for (let c = 0; c < clusters; c++) {
-        const out = inner + c * (2.6 + rng() * 1.8);
-        const h = (4 + profile * 10) * (0.7 + rng() * 0.6);
+      const a = s0.pos.clone().addScaledVector(s0.normal, side * wallAt);
+      const b = s1.pos.clone().addScaledVector(s1.normal, side * wallAt);
+      const mid = a.clone().lerp(b, 0.5);
+      const len = a.distanceTo(b) + 0.05;
+      const ang = Math.atan2(b.x - a.x, b.z - a.z);
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(0.5, wallH, len), wallMat);
+      wall.position.copy(mid); wall.position.y = wallH / 2; wall.rotation.y = ang;
+      wall.castShadow = true; wall.receiveShadow = true;
+      g.add(wall);
+      if (i % 3 === 0) { // emissive cap segments — glow strip along the top
+        const cap = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.18, len * 3), capMat);
+        cap.position.copy(mid); cap.position.y = wallH + 0.1; cap.rotation.y = ang;
+        g.add(cap);
+      }
+    }
+  }
+
+  // rock mountain mass, well outside the walls, swelling in height toward the middle
+  const inner = halfWidth + 4.5;
+  for (let i = 1; i < n - 1; i += 3) {
+    const s = seg[i];
+    const profile = Math.sin((i / (n - 1)) * Math.PI);
+    for (const side of [1, -1]) {
+      for (let c = 0; c < 2; c++) {
+        const out = inner + c * (3.2 + rng() * 2.2);
+        const h = (5 + profile * 11) * (0.7 + rng() * 0.6);
         const rock = new THREE.Mesh(rockGeo, rng() < 0.5 ? rockMat : rockDark);
-        const w = 2.2 + rng() * 2.6;
+        const w = 2.6 + rng() * 3;
         rock.scale.set(w, h, w);
-        rock.position.copy(s.pos)
-          .addScaledVector(s.normal, side * out)
-          .addScaledVector(s.tangent, (rng() - 0.5) * 3);
-        rock.position.y = h * 0.32;
+        rock.position.copy(s.pos).addScaledVector(s.normal, side * out)
+          .addScaledVector(s.tangent, (rng() - 0.5) * 4);
+        rock.position.y = h * 0.3;
         rock.rotation.set(rng(), rng() * Math.PI * 2, rng());
         rock.castShadow = true;
-        rock.receiveShadow = true;
         g.add(rock);
       }
     }
   }
 
-  // stone portal arch at each mouth so it reads clearly as "tunnel through the mountain"
+  // stone portal arch at each mouth
   for (const s of [seg[0], seg[n - 1]]) {
     const arch = new THREE.Group();
-    const angle = Math.atan2(s.normal.x, s.normal.z);
     for (const side of [1, -1]) {
       const pillar = new THREE.Mesh(new THREE.BoxGeometry(2.2, 7, 2.2), rockDark);
-      pillar.position.copy(s.pos).addScaledVector(s.normal, side * (halfWidth + 1.6));
-      pillar.position.y = 3.5;
-      pillar.castShadow = true;
+      pillar.position.copy(s.pos).addScaledVector(s.normal, side * (halfWidth + 2.2));
+      pillar.position.y = 3.5; pillar.castShadow = true;
       arch.add(pillar);
     }
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(halfWidth * 2 + 6, 2.2, 2.4), rockDark);
-    lintel.position.copy(s.pos);
-    lintel.position.y = 7.2;
-    lintel.rotation.y = angle;
-    lintel.castShadow = true;
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(halfWidth * 2 + 7, 2.2, 2.4), rockDark);
+    lintel.position.copy(s.pos); lintel.position.y = 7.2;
+    lintel.rotation.y = Math.atan2(s.normal.x, s.normal.z); lintel.castShadow = true;
     arch.add(lintel);
     g.add(arch);
   }

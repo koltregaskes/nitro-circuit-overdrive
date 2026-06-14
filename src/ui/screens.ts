@@ -189,7 +189,8 @@ export class Screens {
 
     const sub = document.createElement('div');
     sub.style.cssText = 'width:100%;max-width:1180px;margin-bottom:14px';
-    sub.innerHTML = `<h3 class="cyan">${CUP.name} — RACE ${Math.min(p.cup.raceIndex + 1, 4)} / 4</h3>`;
+    const total = CUP.trackIds.length;
+    sub.innerHTML = `<h3 class="cyan">${CUP.name} — RACE ${Math.min(p.cup.raceIndex + 1, total)} / ${total}</h3>`;
     div.appendChild(sub);
 
     const grid = document.createElement('div');
@@ -235,6 +236,16 @@ export class Screens {
       side.appendChild(this.btn(`▶ RACE: ${next.name.toUpperCase()}`, 'primary', () => this.actions.startNextRace()));
     }
     side.appendChild(this.btn('GARAGE & SHOP', '', () => this.actions.toGarage()));
+    // always offer a clean restart from Race 1 (fixes "stuck mid-cup" / can't replay Race 1)
+    if (p.cup.raceIndex > 0 || p.cup.finished) {
+      side.appendChild(this.btn('↻ RESTART CUP (RACE 1)', 'small', () => {
+        if (confirm('Restart the cup from Race 1? Cup points reset; cash & cars are kept.')) {
+          p.cup = freshCup();
+          saveProfile(p);
+          this.showTournament();
+        }
+      }));
+    }
     side.appendChild(this.btn('BACK TO MENU', 'small', () => this.actions.toMenu()));
     if (p.condition < 60) {
       const warn = document.createElement('div');

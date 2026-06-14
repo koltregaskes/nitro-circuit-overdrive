@@ -29,7 +29,8 @@ export interface Profile {
   bestTimes: Record<string, number>;  // trackId -> best lap ms
 }
 
-const KEY = 'nitro-circuit-overdrive-save-v1';
+// v2: cup expanded 4->6 races + new cars; old v1 saves get stuck mid-cup, so reset.
+const KEY = 'nitro-circuit-overdrive-save-v2';
 
 export function freshCup(): CupState {
   return { raceIndex: 0, points: {}, lastResults: null, finished: false };

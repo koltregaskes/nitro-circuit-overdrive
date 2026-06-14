@@ -25,16 +25,8 @@ body {
 
 #game-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 
-/* All UI lives on a virtual 1280x720 stage that scales to fit any display.
-   --ui-scale is set from JS: min(viewportW/1280, viewportH/720). */
-#stage {
-  position: absolute;
-  left: 50%; top: 50%;
-  width: 1280px; height: 720px;
-  transform: translate(-50%, -50%) scale(var(--ui-scale, 1));
-  transform-origin: center center;
-  pointer-events: none;
-}
+/* HUD + menus fill the real viewport and scale type with vmin, so everything
+   stays responsive on any display instead of overflowing a fixed-size stage. */
 #hud { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
 #screen { position: absolute; inset: 0; z-index: 20; pointer-events: none; }
 #screen:empty { display: none; }

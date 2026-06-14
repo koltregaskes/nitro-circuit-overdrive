@@ -1,5 +1,6 @@
 // Nitro Circuit Overdrive — bootstrap, state machine, camera and game loop.
 
+import './style.css';
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -79,6 +80,9 @@ class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // filmic tone mapping = the rich, vivid arcade colour grade (Horizon Chase trick)
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.25;
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 600);
     this.profile = loadProfile();
     this.audio.volume = this.profile.settings.volume;
@@ -114,9 +118,10 @@ class Game {
     this.lastH = h;
     this.renderer.setSize(w, h);
     this.composer?.setSize(w, h);
-    // scale the virtual 1280x720 UI stage to fit the display
-    const uiScale = Math.min(w / 1280, h / 720);
-    document.documentElement.style.setProperty('--ui-scale', String(uiScale));
+    // root font-size scales the (rem-based) UI with the smaller viewport axis,
+    // so menus stay proportional on any display without a fixed clipped stage
+    const fs = Math.max(11, Math.min(20, Math.min(w / 95, h / 54)));
+    document.documentElement.style.fontSize = fs + 'px';
     this.updateCameraFrustum();
   }
 
@@ -125,8 +130,9 @@ class Game {
     const w = window.innerWidth, h = window.innerHeight;
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(scene, this.camera));
-    // bloom at half resolution — the glow is soft so the downscale is invisible but ~4x cheaper
-    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.4, 0.5, 0.82);
+    // bloom at half resolution — soft glow, ~4x cheaper. Lower threshold so kerbs,
+    // headlights, nitro flames and emissive strips bloom for the neon arcade look.
+    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.55, 0.6, 0.62);
     this.composer.addPass(this.bloomPass);
     this.composer.addPass(new OutputPass());
     this.composer.setSize(w, h);
