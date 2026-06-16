@@ -105,9 +105,9 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
 
   // ---- ground plane ----
   const groundTex = speckleTexture(theme.ground, shade(theme.ground, 1.18), shade(theme.ground, 0.8));
-  groundTex.repeat.set(90, 90);
+  groundTex.repeat.set(180, 180);
   const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(420, 40),
+    new THREE.CircleGeometry(900, 48),
     new THREE.MeshLambertMaterial({ color: 0xffffff, map: groundTex })
   );
   ground.rotation.x = -Math.PI / 2;
@@ -237,8 +237,8 @@ function buildKerb(
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.setIndex(indices);
   geo.computeVertexNormals();
-  // unlit + vivid so the kerbs read as glowing neon edges and feed the bloom pass
-  return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  // lit kerbs (no glow) — solid painted red/white edge lines
+  return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
 }
 
 function buildDashes(samples: TrackSample[], halfW: number, color: number, y: number): THREE.Mesh {

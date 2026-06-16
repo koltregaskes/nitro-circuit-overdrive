@@ -80,9 +80,9 @@ class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    // filmic tone mapping = the rich, vivid arcade colour grade (Horizon Chase trick)
+    // filmic tone mapping = richer colour without blowing the highlights out
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.25;
+    this.renderer.toneMappingExposure = 1.0;
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 600);
     this.profile = loadProfile();
     this.audio.volume = this.profile.settings.volume;
@@ -130,9 +130,9 @@ class Game {
     const w = window.innerWidth, h = window.innerHeight;
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(scene, this.camera));
-    // bloom at half resolution — soft glow, ~4x cheaper. Lower threshold so kerbs,
-    // headlights, nitro flames and emissive strips bloom for the neon arcade look.
-    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.55, 0.6, 0.62);
+    // subtle bloom: only genuinely bright sources (headlights, nitro flames) glow
+    // faintly. High threshold so the road/kerbs/ground do NOT glow.
+    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.18, 0.4, 0.95);
     this.composer.addPass(this.bloomPass);
     this.composer.addPass(new OutputPass());
     this.composer.setSize(w, h);

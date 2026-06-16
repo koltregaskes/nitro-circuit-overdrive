@@ -209,18 +209,20 @@ export class Race {
     this.onFinish = onFinish;
     this.sfx = sfx;
     this.scene = new THREE.Scene();
-    // vertical gradient sky + fog matched to the horizon colour (the "postcard" look)
+    // gentle vertical gradient sky + fog matched to the horizon (keeps the far edge
+    // from going dark) — pushed fog back so the ground always fills the view
     const fog = new THREE.Color(track.def.theme.fog);
-    const skyTop = fog.clone().lerp(new THREE.Color(0x0a1020), 0.35);
+    const skyTop = fog.clone().lerp(new THREE.Color(0x223047), 0.18);
     this.scene.background = makeSkyGradient(skyTop, fog);
-    this.scene.fog = new THREE.Fog(fog.getHex(), 150, 380);
+    this.scene.fog = new THREE.Fog(fog.getHex(), 240, 520);
     this.scene.add(track.group);
 
-    const ambient = new THREE.AmbientLight(0xcfe0ff, 0.55);
+    // lower ambient + stronger sun = more form and shadow depth (less flat-lit)
+    const ambient = new THREE.AmbientLight(0xcfe0ff, 0.38);
     this.scene.add(ambient);
-    const hemi = new THREE.HemisphereLight(0xeaf2ff, 0x6b7a4a, 0.45);
+    const hemi = new THREE.HemisphereLight(0xeaf2ff, 0x6b7a4a, 0.4);
     this.scene.add(hemi);
-    const sun = new THREE.DirectionalLight(0xfff2dc, 1.6);
+    const sun = new THREE.DirectionalLight(0xfff2dc, 2.0);
     sun.position.set(60, 120, 40);
     sun.castShadow = true;
     // tighter map + frustum around the player: fewer casters, crisper, far cheaper
@@ -255,6 +257,16 @@ export class Race {
         const m = o as THREE.Mesh;
         if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; }
       });
+      // highlight ring under the player's car so it's always findable in the pack
+      if (cfg.isPlayer) {
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(2.0, 2.5, 24),
+          new THREE.MeshBasicMaterial({ color: 0x2de2e6, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = 0.08;
+        mesh.add(ring);
+      }
       this.scene.add(mesh);
       const maxArmour = 70 + cfg.stats.armour * 8;
       const racer: Racer = {
