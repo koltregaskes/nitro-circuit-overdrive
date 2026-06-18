@@ -150,6 +150,8 @@ export function buildCarFromModel(name: string, color: number, carNum: string): 
     if (m.isMesh && /body/i.test(m.name)) {
       const mat = (m.material as THREE.MeshStandardMaterial).clone();
       mat.color = tint;
+      mat.metalness = 0.55;   // glossy car paint that reflects the environment
+      mat.roughness = 0.35;
       m.material = mat;
     }
   });

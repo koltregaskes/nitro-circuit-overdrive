@@ -6,6 +6,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
   CARS, CUP, PLAYER_CAR_NUM, PLAYER_NAME, RIVALS, TRACKS, effectiveStats,
 } from './game/data';
@@ -72,6 +73,7 @@ class Game {
   private padPrev: boolean[] = [];
   private lastW = 0;
   private lastH = 0;
+  private envMap: THREE.Texture | null = null;
 
   constructor() {
     const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -83,6 +85,9 @@ class Game {
     // filmic tone mapping = richer colour without blowing the highlights out
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
+    // soft studio environment → PBR car paint gets real reflections/highlights
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 600);
     this.profile = loadProfile();
     this.audio.volume = this.profile.settings.volume;
@@ -274,6 +279,7 @@ class Game {
       },
       { weapons: p.settings.weapons }
     );
+    if (this.envMap) this.race.scene.environment = this.envMap;
 
     this.state = 'race';
     this.paused = false;
