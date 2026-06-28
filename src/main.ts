@@ -114,6 +114,8 @@ class Game {
     window.addEventListener('pointerdown', () => this.audio.unlock(), { once: true });
     this.onResize();
     this.toState('menu');
+    // start fetching the 44 GLBs during the menu so the first race isn't blocked on them
+    void ensureModelsLoaded();
     requestAnimationFrame(() => this.loop());
   }
 
@@ -263,6 +265,9 @@ class Game {
     document.getElementById('screen')!.innerHTML =
       '<div class="screen-root"><div style="flex:1"></div><h2 class="cyan">LOADING…</h2><div style="flex:1"></div></div>';
     await ensureModelsLoaded();
+    // let the browser paint the LOADING screen before the synchronous build blocks
+    // (setTimeout, not rAF — rAF is throttled when the tab isn't focused)
+    await new Promise<void>((r) => setTimeout(r, 32));
     const raceIndex = p.cup.raceIndex;
     const trackDef = TRACKS.find((t) => t.id === CUP.trackIds[raceIndex]) ?? TRACKS[0];
     const track = buildTrack(trackDef);
@@ -291,7 +296,7 @@ class Game {
     // snap camera to start and show real HUD values immediately
     this.camPos.copy(this.race.playerPos);
     this.hud.update(this.race.hudState());
-    // pre-compile shaders and warm one frame so the countdown doesn't judder
+    // pre-compile shaders + warm one frame so the countdown doesn't judder
     this.setupComposer(this.race.scene);
     this.camera.position.set(this.camPos.x, 110, this.camPos.z - 52);
     this.camera.lookAt(this.camPos.x, 0, this.camPos.z);
@@ -451,6 +456,7 @@ class Game {
       state: this.state,
       race: this.race,
       profile: this.profile,
+      renderer: this.renderer,
       tick: (dt: number, skipRender = true) => this.tick(dt, skipRender),
     };
   }

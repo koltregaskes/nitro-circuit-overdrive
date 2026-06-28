@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { CarStats } from './data';
-import { BuiltTrack, nearestSample } from './track';
+import { BuiltTrack, Obstacle, nearestSample } from './track';
 import { buildAnimalMesh, buildCarMesh, buildLorryMesh, buildMineMesh, buildMissileMesh } from './carmesh';
 import { DEBRIS_MODELS, buildCarFromModel, cloneScaled } from './models';
 
@@ -193,6 +193,7 @@ export class Race {
   private debris: { mesh: THREE.Object3D; pos: THREE.Vector3; radius: number }[] = [];
   private animals: Animal[] = [];
   private lorryEvt: LorryEvent | null = null;
+  private obstacles: Obstacle[] = []; // race-local copy so the cached track stays pristine
   private nextEventAt = 16 + Math.random() * 12;
   private lorryDone = false;
   private lastCount = -1;
@@ -206,6 +207,7 @@ export class Race {
   ) {
     this.weapons = opts.weapons;
     this.track = track;
+    this.obstacles = track.obstacles.map((o) => ({ pos: o.pos, radius: o.radius }));
     this.onFinish = onFinish;
     this.sfx = sfx;
     this.scene = new THREE.Scene();
@@ -437,8 +439,8 @@ export class Race {
       }
       if (L.spillCount >= 5) {
         L.phase = 'done';
-        // the wreck itself is now a solid obstacle
-        this.track.obstacles.push({ pos: L.crashPos.clone().setY(0), radius: 3.4 });
+        // the wreck itself is now a solid obstacle (race-local, not the cached track)
+        this.obstacles.push({ pos: L.crashPos.clone().setY(0), radius: 3.4 });
       }
     }
   }
@@ -695,7 +697,7 @@ export class Race {
     }
     // solid obstacles (trees, rocks, pillars, the tanker wreck): crash on contact
     if (Math.abs(r.speed) > 7) {
-      for (const o of this.track.obstacles) {
+      for (const o of this.obstacles) {
         const dx = r.pos.x - o.pos.x, dz = r.pos.z - o.pos.z;
         const rr = o.radius + 1.0;
         if (dx * dx + dz * dz < rr * rr) { this.crashRacer(r); break; }
@@ -1181,6 +1183,10 @@ export class Race {
   }
 
   dispose(): void {
+    // The track group is cached and reused across races (its instanced foliage shares
+    // geometry/materials from the model cache). Detach it WITHOUT disposing so the next
+    // race can re-add it; dispose only the per-race scene contents (cars, effects, etc).
+    this.scene.remove(this.track.group);
     this.scene.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       if (mesh.geometry) mesh.geometry.dispose();

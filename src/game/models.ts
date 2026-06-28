@@ -113,6 +113,48 @@ export function cloneScaled(name: string, targetSize: number, alignLongAxisToZ =
   return wrapper;
 }
 
+export interface InstancePart {
+  geometry: THREE.BufferGeometry;
+  material: THREE.Material;
+}
+
+const partsCache = new Map<string, InstancePart[]>();
+
+/**
+ * Bake a model's sub-meshes into geometry normalised to height=1, centred on x/z
+ * with its base at y=0, sharing the source material. One InstancedMesh per part
+ * then renders ALL placements of that model in a single draw call. Cached per name.
+ * Per-instance matrix = translate(pos) · rotateY · scale(height).
+ */
+export function getInstanceParts(name: string): InstancePart[] {
+  const cached = partsCache.get(name);
+  if (cached) return cached;
+  const src = cache.get(name);
+  if (!src) return [];
+  src.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(src);
+  const size = box.getSize(new THREE.Vector3());
+  const h = size.y > 0.0001 ? size.y : 1;
+  const cx = (box.min.x + box.max.x) / 2;
+  const cz = (box.min.z + box.max.z) / 2;
+  // normalise: world → centred-x/z, base at 0, scaled so height = 1
+  const norm = new THREE.Matrix4()
+    .makeScale(1 / h, 1 / h, 1 / h)
+    .multiply(new THREE.Matrix4().makeTranslation(-cx, -box.min.y, -cz));
+  const parts: InstancePart[] = [];
+  src.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh) {
+      const g = m.geometry.clone();
+      g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(norm, m.matrixWorld));
+      const mat = Array.isArray(m.material) ? m.material[0] : m.material;
+      parts.push({ geometry: g, material: mat });
+    }
+  });
+  partsCache.set(name, parts);
+  return parts;
+}
+
 /** Tree/rock clone scaled by world height instead of footprint. */
 export function cloneByHeight(name: string, targetHeight: number): THREE.Group | null {
   const obj = rawClone(name);

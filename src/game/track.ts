@@ -1,8 +1,9 @@
 // Procedural track construction from a closed control-point loop.
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TrackDef } from './data';
-import { cloneByHeight, hasModel } from './models';
+import { getInstanceParts, hasModel } from './models';
 
 export interface TrackSample {
   pos: THREE.Vector3;
@@ -69,7 +70,15 @@ function shade(color: number, f: number): number {
   return c.getHex();
 }
 
+// Built tracks are deterministic for (def, seed) and immutable after build, so cache
+// and reuse them across races — eliminates the per-race build hitch on repeat tracks.
+const trackCache = new Map<string, BuiltTrack>();
+
 export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
+  const cacheKey = def.id + ':' + seed;
+  const hit = trackCache.get(cacheKey);
+  if (hit) return hit;
+
   const group = new THREE.Group();
   const rng = mulberry32(seed + def.id.length * 7919);
 
@@ -185,7 +194,10 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
     startPositions.push({ pos, heading });
   }
 
-  return { def, group, samples, totalLength, segLength, halfWidth, minimap, startPositions, obstacles };
+  group.userData.cached = true;
+  const built: BuiltTrack = { def, group, samples, totalLength, segLength, halfWidth, minimap, startPositions, obstacles };
+  trackCache.set(cacheKey, built);
+  return built;
 }
 
 function buildRibbon(
@@ -270,42 +282,48 @@ function buildDashes(samples: TrackSample[], halfW: number, color: number, y: nu
 // road edge are the visible track limits (with an emissive cap that glows under
 // bloom for readability); the rock mountain sits well outside them. Road stays
 // fully open to the camera so cars/the truck are always visible.
+// Vertical wall strip following a run of samples at a lateral offset (one merged mesh).
+function wallStrip(seg: TrackSample[], lateral: number, y0: number, y1: number): THREE.BufferGeometry {
+  const n = seg.length;
+  const pos = new Float32Array(n * 2 * 3);
+  const idx: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const base = seg[i].pos.clone().addScaledVector(seg[i].normal, lateral);
+    pos.set([base.x, y0, base.z, base.x, y1, base.z], i * 6);
+    if (i < n - 1) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 2, i * 2 + 1, i * 2 + 3);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 function buildMountainPass(
   seg: TrackSample[], halfWidth: number, def: TrackDef, rng: () => number
 ): THREE.Group {
   const g = new THREE.Group();
   const n = seg.length;
   const rockBase = new THREE.Color(0x6b6258).lerp(new THREE.Color(def.theme.ground), 0.25);
-  const rockMat = new THREE.MeshLambertMaterial({ color: rockBase.getHex() });
-  const rockDark = new THREE.MeshLambertMaterial({ color: rockBase.clone().multiplyScalar(0.65).getHex() });
-  const wallMat = new THREE.MeshLambertMaterial({ color: 0x3a3f4a });
-  const capMat = new THREE.MeshBasicMaterial({ color: def.theme.stripeB });
-  const rockGeo = new THREE.IcosahedronGeometry(1, 0);
+  const rockMat = new THREE.MeshLambertMaterial({ color: rockBase.getHex(), flatShading: true });
+  const rockDark = new THREE.MeshLambertMaterial({ color: rockBase.clone().multiplyScalar(0.65).getHex(), flatShading: true });
+  const wallMat = new THREE.MeshLambertMaterial({ color: 0x3a3f4a, side: THREE.DoubleSide });
+  const capMat = new THREE.MeshLambertMaterial({ color: def.theme.stripeB, side: THREE.DoubleSide });
 
-  const wallAt = halfWidth + 0.7; // track limit
-  const wallH = 1.9;
-  for (let i = 0; i < n - 1; i++) {
-    const s0 = seg[i], s1 = seg[i + 1];
-    for (const side of [1, -1]) {
-      const a = s0.pos.clone().addScaledVector(s0.normal, side * wallAt);
-      const b = s1.pos.clone().addScaledVector(s1.normal, side * wallAt);
-      const mid = a.clone().lerp(b, 0.5);
-      const len = a.distanceTo(b) + 0.05;
-      const ang = Math.atan2(b.x - a.x, b.z - a.z);
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(0.5, wallH, len), wallMat);
-      wall.position.copy(mid); wall.position.y = wallH / 2; wall.rotation.y = ang;
-      wall.castShadow = true; wall.receiveShadow = true;
-      g.add(wall);
-      if (i % 3 === 0) { // emissive cap segments — glow strip along the top
-        const cap = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.18, len * 3), capMat);
-        cap.position.copy(mid); cap.position.y = wallH + 0.1; cap.rotation.y = ang;
-        g.add(cap);
-      }
-    }
+  // barrier walls = one merged strip per side + a thin cap strip (track limits)
+  const wallAt = halfWidth + 0.7, wallH = 1.9;
+  for (const side of [1, -1]) {
+    const wall = new THREE.Mesh(wallStrip(seg, side * wallAt, 0, wallH), wallMat);
+    wall.castShadow = true; wall.receiveShadow = true;
+    g.add(wall);
+    g.add(new THREE.Mesh(wallStrip(seg, side * wallAt, wallH, wallH + 0.22), capMat));
   }
 
-  // rock mountain mass, well outside the walls, swelling in height toward the middle
+  // rock mountain mass → TWO InstancedMeshes (was 400-800 individual meshes)
+  const rockGeo = new THREE.IcosahedronGeometry(1, 0);
   const inner = halfWidth + 4.5;
+  const light: THREE.Matrix4[] = [], dark: THREE.Matrix4[] = [];
+  const dummy = new THREE.Object3D();
   for (let i = 1; i < n - 1; i += 3) {
     const s = seg[i];
     const profile = Math.sin((i / (n - 1)) * Math.PI);
@@ -313,34 +331,44 @@ function buildMountainPass(
       for (let c = 0; c < 2; c++) {
         const out = inner + c * (3.2 + rng() * 2.2);
         const h = (5 + profile * 11) * (0.7 + rng() * 0.6);
-        const rock = new THREE.Mesh(rockGeo, rng() < 0.5 ? rockMat : rockDark);
         const w = 2.6 + rng() * 3;
-        rock.scale.set(w, h, w);
-        rock.position.copy(s.pos).addScaledVector(s.normal, side * out)
+        dummy.position.copy(s.pos).addScaledVector(s.normal, side * out)
           .addScaledVector(s.tangent, (rng() - 0.5) * 4);
-        rock.position.y = h * 0.3;
-        rock.rotation.set(rng(), rng() * Math.PI * 2, rng());
-        rock.castShadow = true;
-        g.add(rock);
+        dummy.position.y = h * 0.3;
+        dummy.rotation.set(rng(), rng() * Math.PI * 2, rng());
+        dummy.scale.set(w, h, w);
+        dummy.updateMatrix();
+        (rng() < 0.5 ? light : dark).push(dummy.matrix.clone());
       }
     }
   }
-
-  // stone portal arch at each mouth
-  for (const s of [seg[0], seg[n - 1]]) {
-    const arch = new THREE.Group();
-    for (const side of [1, -1]) {
-      const pillar = new THREE.Mesh(new THREE.BoxGeometry(2.2, 7, 2.2), rockDark);
-      pillar.position.copy(s.pos).addScaledVector(s.normal, side * (halfWidth + 2.2));
-      pillar.position.y = 3.5; pillar.castShadow = true;
-      arch.add(pillar);
-    }
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(halfWidth * 2 + 7, 2.2, 2.4), rockDark);
-    lintel.position.copy(s.pos); lintel.position.y = 7.2;
-    lintel.rotation.y = Math.atan2(s.normal.x, s.normal.z); lintel.castShadow = true;
-    arch.add(lintel);
-    g.add(arch);
+  for (const [mats, mat] of [[light, rockMat], [dark, rockDark]] as const) {
+    if (!mats.length) continue;
+    const inst = new THREE.InstancedMesh(rockGeo, mat, mats.length);
+    inst.castShadow = true;
+    inst.frustumCulled = false;
+    mats.forEach((m, i) => inst.setMatrixAt(i, m));
+    inst.instanceMatrix.needsUpdate = true;
+    g.add(inst);
   }
+
+  // stone portal arches → one merged mesh
+  const archGeos: THREE.BufferGeometry[] = [];
+  for (const s of [seg[0], seg[n - 1]]) {
+    const ang = Math.atan2(s.normal.x, s.normal.z);
+    for (const side of [1, -1]) {
+      const pg = new THREE.BoxGeometry(2.2, 7, 2.2);
+      const pp = s.pos.clone().addScaledVector(s.normal, side * (halfWidth + 2.2));
+      pg.translate(pp.x, 3.5, pp.z);
+      archGeos.push(pg);
+    }
+    const lg = new THREE.BoxGeometry(halfWidth * 2 + 7, 2.2, 2.4);
+    lg.rotateY(ang); lg.translate(s.pos.x, 7.2, s.pos.z);
+    archGeos.push(lg);
+  }
+  const arches = new THREE.Mesh(mergeGeometries(archGeos), rockDark);
+  arches.castShadow = true;
+  g.add(arches);
   return g;
 }
 
@@ -417,6 +445,9 @@ function addDecor(
 
   const clearance = halfWidth + 4.5;
   const placed: THREE.Vector3[] = [];
+  const useModels = theme.trees.some((t) => hasModel(t)) || theme.rocks.some((t) => hasModel(t));
+  // collect per-model placements so each model type renders as ONE instanced draw call
+  const byModel = new Map<string, { p: THREE.Vector3; angle: number; height: number }[]>();
 
   let attempts = 0;
   while (placed.length < 140 && attempts < 2000) {
@@ -439,21 +470,18 @@ function addDecor(
     const roll = rng();
     // record a solid collision volume (trees thinner than their canopy, rocks chunky)
     obstacles.push({ pos: p.clone(), radius: roll < 0.79 ? 1.3 : 1.5 });
-    // prefer Kenney GLB models when loaded; fall back to procedural shapes
-    const useModels = theme.trees.some((t) => hasModel(t));
+    const isTree = roll < 0.8;
+    // prefer Kenney GLB models when loaded → bucket for instancing
     if (useModels) {
-      const isTree = roll < 0.8;
-      const pool = isTree ? theme.trees.filter(hasModel) : theme.rocks.filter(hasModel);
+      const pool = (isTree ? theme.trees : theme.rocks).filter(hasModel);
       if (pool.length > 0) {
         const name = pool[Math.floor(rng() * pool.length)];
         const height = isTree ? 5.5 + rng() * 4.5 : 0.9 + rng() * 1.6;
-        const model = cloneByHeight(name, height);
-        if (model) {
-          model.position.copy(p);
-          model.rotation.y = rng() * Math.PI * 2;
-          group.add(model);
-          continue;
-        }
+        const angle = rng() * Math.PI * 2;
+        let arr = byModel.get(name);
+        if (!arr) { arr = []; byModel.set(name, arr); }
+        arr.push({ p: p.clone(), angle, height });
+        continue;
       }
     }
     if (roll < 0.78) {
@@ -500,24 +528,52 @@ function addDecor(
     }
   }
 
-  // trackside flags near corners
-  const flagMat = new THREE.MeshLambertMaterial({ color: 0x7a3bd6 });
-  const poleMat = new THREE.MeshLambertMaterial({ color: 0xdddddd });
+  // ---- build one InstancedMesh per model part (the 140-draw-call → ~handful win) ----
+  const dummy = new THREE.Object3D();
+  for (const [name, list] of byModel) {
+    for (const part of getInstanceParts(name)) {
+      const inst = new THREE.InstancedMesh(part.geometry, part.material, list.length);
+      inst.castShadow = true;
+      inst.receiveShadow = true;
+      inst.frustumCulled = false; // spread across the whole map; 1 cheap draw call each
+      for (let i = 0; i < list.length; i++) {
+        const it = list[i];
+        dummy.position.copy(it.p);
+        dummy.rotation.set(0, it.angle, 0);
+        dummy.scale.setScalar(it.height);
+        dummy.updateMatrix();
+        inst.setMatrixAt(i, dummy.matrix);
+      }
+      inst.instanceMatrix.needsUpdate = true;
+      group.add(inst);
+    }
+  }
+
+  // ---- trackside flags near corners (merged into 2 meshes) ----
+  const poleGeos: THREE.BufferGeometry[] = [];
+  const bannerGeos: THREE.BufferGeometry[] = [];
+  const poleProto = new THREE.CylinderGeometry(0.08, 0.08, 4, 5);
+  const bannerProto = new THREE.PlaneGeometry(0.9, 2.6);
   for (let i = 0; i < samples.length; i += 50) {
     const s = samples[i];
     if (s.curvature < 0.02) continue;
     const side = rng() < 0.5 ? 1 : -1;
-    const flag = new THREE.Group();
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 4, 5), poleMat);
-    pole.position.y = 2;
-    pole.castShadow = true;
-    flag.add(pole);
-    const banner = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 2.6), flagMat);
-    banner.position.set(0.5, 2.6, 0);
-    banner.material.side = THREE.DoubleSide;
-    flag.add(banner);
-    flag.position.copy(s.pos).add(s.normal.clone().multiplyScalar(side * (halfWidth + 3)));
-    group.add(flag);
+    const base = s.pos.clone().add(s.normal.clone().multiplyScalar(side * (halfWidth + 3)));
+    const pg = poleProto.clone();
+    pg.translate(base.x, 2, base.z);
+    poleGeos.push(pg);
+    const bg = bannerProto.clone();
+    bg.translate(base.x + 0.5, 2.6, base.z);
+    bannerGeos.push(bg);
+  }
+  if (poleGeos.length) {
+    const poles = new THREE.Mesh(mergeGeometries(poleGeos), new THREE.MeshLambertMaterial({ color: 0xdddddd }));
+    poles.castShadow = true;
+    group.add(poles);
+    group.add(new THREE.Mesh(
+      mergeGeometries(bannerGeos),
+      new THREE.MeshLambertMaterial({ color: 0x7a3bd6, side: THREE.DoubleSide })
+    ));
   }
 }
 
