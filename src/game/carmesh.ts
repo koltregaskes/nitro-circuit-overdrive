@@ -4,9 +4,10 @@ import * as THREE from 'three';
 
 export function buildCarMesh(color: number, accent: number, carNum: string): THREE.Group {
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshLambertMaterial({ color });
-  const darkMat = new THREE.MeshLambertMaterial({ color: 0x1c1f26 });
-  const accentMat = new THREE.MeshLambertMaterial({ color: accent });
+  // flat-shaded standard mats: faceted forms that catch the env map like the GLB cars
+  const bodyMat = new THREE.MeshStandardMaterial({ color, flatShading: true, metalness: 0.45, roughness: 0.4 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x1c1f26, flatShading: true, roughness: 0.7 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: accent, flatShading: true, roughness: 0.5 });
 
   // body — car points along +Z
   const body = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.55, 3.4), bodyMat);
@@ -147,13 +148,13 @@ export function buildLorryMesh(): THREE.Group {
   const g = new THREE.Group();
   const cab = new THREE.Mesh(
     new THREE.BoxGeometry(2.2, 2.0, 2.4),
-    new THREE.MeshLambertMaterial({ color: 0xd6582d })
+    new THREE.MeshStandardMaterial({ color: 0xd6582d, flatShading: true, roughness: 0.5 })
   );
   cab.position.set(0, 1.0, 3.6);
   g.add(cab);
   const tank = new THREE.Mesh(
     new THREE.CylinderGeometry(1.3, 1.3, 5.5, 10),
-    new THREE.MeshLambertMaterial({ color: 0xb8bec9 })
+    new THREE.MeshStandardMaterial({ color: 0xb8bec9, flatShading: true, metalness: 0.5, roughness: 0.35 })
   );
   tank.rotation.x = Math.PI / 2;
   tank.position.set(0, 1.4, 0);

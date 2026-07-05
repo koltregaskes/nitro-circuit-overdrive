@@ -482,6 +482,20 @@ export class Screens {
     });
     mkRow('WEAPONS (MISSILES & MINES)', weapons);
 
+    const quality = document.createElement('select');
+    quality.style.cssText = 'pointer-events:auto;padding:4px 8px;font-weight:700;background:#12141c;color:#e8e8ee;border:1px solid #2de2e6;border-radius:6px';
+    for (const [val, label] of [['low', 'LOW'], ['medium', 'MEDIUM'], ['high', 'HIGH']] as const) {
+      const opt = document.createElement('option');
+      opt.value = val; opt.textContent = label;
+      if (p.settings.quality === val) opt.selected = true;
+      quality.appendChild(opt);
+    }
+    quality.addEventListener('change', () => {
+      p.settings.quality = quality.value as typeof p.settings.quality;
+      saveProfile(p); this.actions.applySettings();
+    });
+    mkRow('GRAPHICS QUALITY', quality);
+
     const resetBtn = this.btn('RESET SAVE DATA', 'small', () => {
       if (confirm('Delete all progress and start fresh?')) {
         this.actions.profileReset();

@@ -82,6 +82,18 @@ export function upgradeCost(spec: UpgradeSpec, currentLevel: number): number {
 export const ITEM_PRICES = { missile: 2500, mine: 1800 };
 export const REPAIR_PRICE_PER_PCT = 60; // cash per 1% condition
 
+export interface ThemeLighting {
+  sun: number;          // key light colour
+  sunIntensity: number;
+  ambient: number;
+  ambientIntensity: number;
+  hemiSky: number;
+  hemiGround: number;
+  hemiIntensity: number;
+  rim: number;          // cool back light opposite the sun (edge separation)
+  rimIntensity: number;
+}
+
 export interface TrackTheme {
   ground: number;
   groundAlt: number;
@@ -90,6 +102,11 @@ export interface TrackTheme {
   stripeB: number;
   foliage: number[];
   fog: number;
+  skyTop: number;       // sky-dome zenith colour (horizon = fog colour)
+  fogDensity: number;   // FogExp2 density
+  grade: { hue: number; saturation: number }; // post-stack colour grade (-1..1)
+  night: boolean;       // nocturnal lighting rig
+  light: ThemeLighting;
   trees: string[];  // GLB model names (see models.ts)
   rocks: string[];
 }
@@ -115,6 +132,15 @@ const FOREST: TrackTheme = {
   stripeA: 0xd9d9d9, stripeB: 0xc23b3b,
   foliage: [0xd97f30, 0xc9522e, 0xe0a832, 0x4d7a33, 0xb33b2e],
   fog: 0xbcc8a8,
+  skyTop: 0x87b0dd, fogDensity: 0.0020,
+  grade: { hue: 0.0, saturation: 0.12 },
+  night: false,
+  light: {
+    sun: 0xfff2dc, sunIntensity: 2.0,
+    ambient: 0xcfe0ff, ambientIntensity: 0.38,
+    hemiSky: 0xeaf2ff, hemiGround: 0x6b7a4a, hemiIntensity: 0.4,
+    rim: 0x9ec8ff, rimIntensity: 0.55,
+  },
   trees: ['tree_default_fall', 'tree_oak_fall', 'tree_detailed_fall', 'tree_simple_fall'],
   rocks: ['rock_smallA', 'stone_largeA'],
 };
@@ -124,6 +150,15 @@ const DESERT: TrackTheme = {
   stripeA: 0xe8e3d4, stripeB: 0xc25b2e,
   foliage: [0x6f8a3a, 0x8aa04a, 0xb3793a],
   fog: 0xe3cfa3,
+  skyTop: 0x8ab6e0, fogDensity: 0.0016,
+  grade: { hue: 0.01, saturation: 0.10 },
+  night: false,
+  light: {
+    sun: 0xffe9c4, sunIntensity: 2.2,
+    ambient: 0xffe7c9, ambientIntensity: 0.34,
+    hemiSky: 0xfdf3df, hemiGround: 0xa8874f, hemiIntensity: 0.42,
+    rim: 0x9ec8ff, rimIntensity: 0.5,
+  },
   trees: ['tree_palm', 'tree_palmShort', 'tree_palmTall'],
   rocks: ['rock_smallA', 'rock_smallB', 'stone_largeA', 'stone_largeB'],
 };
@@ -133,6 +168,15 @@ const SNOW: TrackTheme = {
   stripeA: 0xe8e8e8, stripeB: 0x3a76c2,
   foliage: [0x3d6647, 0x4a7a55, 0xcdd8e2],
   fog: 0xe8eef4,
+  skyTop: 0x9fc4e8, fogDensity: 0.0023,
+  grade: { hue: 0.0, saturation: 0.05 },
+  night: false,
+  light: {
+    sun: 0xfff6e8, sunIntensity: 2.1,
+    ambient: 0xdcecff, ambientIntensity: 0.45,
+    hemiSky: 0xf2f8ff, hemiGround: 0x9fb3c8, hemiIntensity: 0.45,
+    rim: 0x8fb8ff, rimIntensity: 0.6,
+  },
   trees: ['tree_pineDefaultA', 'tree_pineDefaultB', 'tree_pineRoundA', 'tree_pineTallA'],
   rocks: ['stone_largeA', 'stone_largeB'],
 };
@@ -142,6 +186,15 @@ const NIGHT: TrackTheme = {
   stripeA: 0x9ad4e0, stripeB: 0xd44a8a,
   foliage: [0x3a8a99, 0x8a3a99, 0x2e6680, 0xb35980],
   fog: 0x16202e,
+  skyTop: 0x05070f, fogDensity: 0.0030,
+  grade: { hue: 0.0, saturation: 0.04 },
+  night: true,
+  light: {
+    sun: 0x8fa8d9, sunIntensity: 0.85,       // moonlight
+    ambient: 0x36486b, ambientIntensity: 0.34,
+    hemiSky: 0x2c3c5c, hemiGround: 0x141b28, hemiIntensity: 0.38,
+    rim: 0xd44a8a, rimIntensity: 0.7,        // neon-street magenta edge
+  },
   trees: ['tree_default_dark', 'tree_thin_dark', 'tree_oak_dark', 'tree_cone_dark'],
   rocks: ['rock_smallA', 'rock_smallB'],
 };

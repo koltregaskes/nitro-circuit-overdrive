@@ -305,10 +305,10 @@ function buildMountainPass(
   const g = new THREE.Group();
   const n = seg.length;
   const rockBase = new THREE.Color(0x6b6258).lerp(new THREE.Color(def.theme.ground), 0.25);
-  const rockMat = new THREE.MeshLambertMaterial({ color: rockBase.getHex(), flatShading: true });
-  const rockDark = new THREE.MeshLambertMaterial({ color: rockBase.clone().multiplyScalar(0.65).getHex(), flatShading: true });
-  const wallMat = new THREE.MeshLambertMaterial({ color: 0x3a3f4a, side: THREE.DoubleSide });
-  const capMat = new THREE.MeshLambertMaterial({ color: def.theme.stripeB, side: THREE.DoubleSide });
+  const rockMat = new THREE.MeshStandardMaterial({ color: rockBase.getHex(), flatShading: true, roughness: 0.95 });
+  const rockDark = new THREE.MeshStandardMaterial({ color: rockBase.clone().multiplyScalar(0.65).getHex(), flatShading: true, roughness: 0.95 });
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x3a3f4a, side: THREE.DoubleSide, flatShading: true, roughness: 0.9 });
+  const capMat = new THREE.MeshStandardMaterial({ color: def.theme.stripeB, side: THREE.DoubleSide, roughness: 0.6 });
 
   // barrier walls = one merged strip per side + a thin cap strip (track limits)
   const wallAt = halfWidth + 0.7, wallH = 1.9;
@@ -375,7 +375,7 @@ function buildMountainPass(
 // Decorative overpass crossing above the road.
 function buildBridge(s: TrackSample, halfWidth: number): THREE.Group {
   const g = new THREE.Group();
-  const deckMat = new THREE.MeshLambertMaterial({ color: 0x76808f });
+  const deckMat = new THREE.MeshStandardMaterial({ color: 0x76808f, flatShading: true, roughness: 0.85 });
   const span = halfWidth + 9;
   const deck = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.7, span * 2), deckMat);
   deck.position.copy(s.pos);
@@ -391,7 +391,7 @@ function buildBridge(s: TrackSample, halfWidth: number): THREE.Group {
     r.rotation.y = deck.rotation.y;
     g.add(r);
   }
-  const pillarMat = new THREE.MeshLambertMaterial({ color: 0x5c6675 });
+  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x5c6675, flatShading: true, roughness: 0.85 });
   for (const side of [1, -1]) {
     const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 4.8, 8), pillarMat);
     pillar.position.copy(s.pos).addScaledVector(s.normal, side * (halfWidth + 4.5));
@@ -430,9 +430,9 @@ function addDecor(
   def: TrackDef, rng: () => number, obstacles: Obstacle[]
 ): void {
   const theme = def.theme;
-  const foliageMats = theme.foliage.map((c) => new THREE.MeshLambertMaterial({ color: c }));
-  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x6b4a2e });
-  const rockMat = new THREE.MeshLambertMaterial({ color: 0xa8a8a8 });
+  const foliageMats = theme.foliage.map((c) => new THREE.MeshStandardMaterial({ color: c, flatShading: true, roughness: 0.9 }));
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2e, flatShading: true, roughness: 0.95 });
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0xa8a8a8, flatShading: true, roughness: 0.95 });
 
   const blobGeo = new THREE.IcosahedronGeometry(1, 0);
   const canopyGeo = new THREE.SphereGeometry(1, 7, 6);

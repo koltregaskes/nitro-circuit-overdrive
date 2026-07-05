@@ -147,7 +147,11 @@ export function getInstanceParts(name: string): InstancePart[] {
     if (m.isMesh) {
       const g = m.geometry.clone();
       g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(norm, m.matrixWorld));
-      const mat = Array.isArray(m.material) ? m.material[0] : m.material;
+      // flat-shaded clone (art-of-rally faceting) — clone so the shared GLB source
+      // material (also used by car/debris clones) is never mutated
+      const src = Array.isArray(m.material) ? m.material[0] : m.material;
+      const mat = src.clone() as THREE.MeshStandardMaterial;
+      if ('flatShading' in mat) { mat.flatShading = true; mat.needsUpdate = true; }
       parts.push({ geometry: g, material: mat });
     }
   });

@@ -9,11 +9,14 @@ export interface CupState {
   finished: boolean;
 }
 
+export type Quality = 'low' | 'medium' | 'high';
+
 export interface Settings {
   volume: number;       // 0-1
   zoom: number;         // 0.7 - 1.4 multiplier
   assist: boolean;      // steering/grip assist
   weapons: boolean;     // missiles/mines on or off
+  quality: Quality;     // post-FX tier: low=bloom only, medium=+grade/vignette/grain, high=+GTAO/SMAA
 }
 
 export interface Profile {
@@ -46,7 +49,7 @@ export function freshProfile(): Profile {
     condition: 100,
     items: { ...STARTING_ITEMS },
     cup: freshCup(),
-    settings: { volume: 0.6, zoom: 1.0, assist: true, weapons: true },
+    settings: { volume: 0.6, zoom: 1.0, assist: true, weapons: true, quality: 'high' },
     tutorialSeen: false,
     bestTimes: {},
   };

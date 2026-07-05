@@ -5,6 +5,12 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { FilmPass } from 'three/examples/jsm/postprocessing/FilmPass.js';
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { VignetteShader } from 'three/examples/jsm/shaders/VignetteShader.js';
+import { HueSaturationShader } from 'three/examples/jsm/shaders/HueSaturationShader.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
@@ -70,6 +76,7 @@ class Game {
   private lastTime = performance.now();
   private composer: EffectComposer | null = null;
   private bloomPass: UnrealBloomPass | null = null;
+  private gtaoPass: GTAOPass | null = null;
   private padPrev: boolean[] = [];
   private lastW = 0;
   private lastH = 0;
@@ -88,7 +95,9 @@ class Game {
     // soft studio environment → PBR car paint gets real reflections/highlights
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 600);
+    // far plane reaches past the sky-dome radius (1200) so the dome, which is centred
+    // on the world origin and encloses the roaming camera, is never clipped away
+    this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 2200);
     this.profile = loadProfile();
     this.audio.volume = this.profile.settings.volume;
 
@@ -135,12 +144,48 @@ class Game {
   private setupComposer(scene: THREE.Scene): void {
     this.disposeComposer();
     const w = window.innerWidth, h = window.innerHeight;
+    const quality = this.profile.settings.quality;
+    const grade = this.race?.track.def.theme.grade ?? { hue: 0, saturation: 0 };
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(scene, this.camera));
+
+    // contact ambient occlusion (art-of-rally grounding) — HIGH quality only, it's
+    // the priciest pass. Renders a G-buffer, so tune radius for the world scale.
+    if (quality === 'high') {
+      const gtao = new GTAOPass(scene, this.camera, w, h);
+      gtao.output = GTAOPass.OUTPUT.Default;
+      gtao.blendIntensity = 0.9;
+      gtao.updateGtaoMaterial({ radius: 4.0, distanceExponent: 1.0, thickness: 1.0, scale: 1.0 });
+      this.composer.addPass(gtao);
+      this.gtaoPass = gtao;
+    }
+
     // subtle bloom: only genuinely bright sources (headlights, nitro flames) glow
     // faintly. High threshold so the road/kerbs/ground do NOT glow.
     this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.18, 0.4, 0.95);
     this.composer.addPass(this.bloomPass);
+
+    // medium+: cinematic grade — vignette, per-theme hue/sat push, fine film grain
+    if (quality !== 'low') {
+      const vignette = new ShaderPass(VignetteShader);
+      vignette.uniforms.offset.value = 1.15;
+      vignette.uniforms.darkness.value = 1.1;
+      this.composer.addPass(vignette);
+
+      const grading = new ShaderPass(HueSaturationShader);
+      grading.uniforms.hue.value = grade.hue;
+      grading.uniforms.saturation.value = grade.saturation;
+      this.composer.addPass(grading);
+
+      // FilmPass(intensity, grayscale) — keep grain barely-there
+      this.composer.addPass(new FilmPass(0.18, false));
+    }
+
+    // edge AA to finish — HIGH only (SMAA is a full extra pass)
+    if (quality === 'high') {
+      this.composer.addPass(new SMAAPass(w, h));
+    }
+
     this.composer.addPass(new OutputPass());
     this.composer.setSize(w, h);
   }
@@ -149,6 +194,7 @@ class Game {
     this.composer?.dispose();
     this.composer = null;
     this.bloomPass = null;
+    this.gtaoPass = null;
   }
 
   /** Poll the first connected gamepad (standard/Xbox mapping). */

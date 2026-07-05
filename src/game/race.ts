@@ -150,19 +150,44 @@ export type RacePhase = 'countdown' | 'racing' | 'finished';
 
 const GRID_COLORS_FALLBACK = 0x888888;
 
-// Vertical two-stop gradient used as the scene background (cheap "sky").
-function makeSkyGradient(top: THREE.Color, bottom: THREE.Color): THREE.CanvasTexture {
-  const c = document.createElement('canvas');
-  c.width = 4; c.height = 256;
-  const ctx = c.getContext('2d')!;
-  const grad = ctx.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0, '#' + top.getHexString());
-  grad.addColorStop(1, '#' + bottom.getHexString());
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 4, 256);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+// Inward-facing gradient sky dome (art-of-rally look): horizon = fog colour so the
+// dome, fog and ground edge all blend into one atmosphere.
+function makeSkyDome(top: THREE.Color, horizon: THREE.Color): THREE.Mesh {
+  // radius sits the camera (which roams ±~250 around origin) comfortably inside the
+  // dome while staying within the ortho far plane (main.ts sets far=2200)
+  const geo = new THREE.SphereGeometry(1200, 24, 12);
+  const mat = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    uniforms: {
+      topColor: { value: top.clone() },
+      bottomColor: { value: horizon.clone() },
+      offset: { value: 120 },     // pushes the gradient midpoint above the horizon
+      exponent: { value: 0.7 },
+    },
+    vertexShader: /* glsl */`
+      varying vec3 vWorldPosition;
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform vec3 topColor;
+      uniform vec3 bottomColor;
+      uniform float offset;
+      uniform float exponent;
+      varying vec3 vWorldPosition;
+      void main() {
+        float h = normalize(vWorldPosition + vec3(0.0, offset, 0.0)).y;
+        gl_FragColor = vec4(mix(bottomColor, topColor, pow(max(h, 0.0), exponent)), 1.0);
+      }
+    `,
+  });
+  const dome = new THREE.Mesh(geo, mat);
+  dome.frustumCulled = false;
+  return dome;
 }
 
 export class Race {
@@ -211,20 +236,27 @@ export class Race {
     this.onFinish = onFinish;
     this.sfx = sfx;
     this.scene = new THREE.Scene();
-    // gentle vertical gradient sky + fog matched to the horizon (keeps the far edge
-    // from going dark) — pushed fog back so the ground always fills the view
-    const fog = new THREE.Color(track.def.theme.fog);
-    const skyTop = fog.clone().lerp(new THREE.Color(0x223047), 0.18);
-    this.scene.background = makeSkyGradient(skyTop, fog);
-    this.scene.fog = new THREE.Fog(fog.getHex(), 240, 520);
+    // sky dome + exponential fog, both keyed to the theme: the dome horizon equals
+    // the fog colour so distance haze reads as one continuous atmosphere
+    const theme = track.def.theme;
+    const fog = new THREE.Color(theme.fog);
+    this.scene.background = fog.clone(); // fallback where the dome is clipped
+    this.scene.add(makeSkyDome(new THREE.Color(theme.skyTop), fog));
+    this.scene.fog = new THREE.FogExp2(fog.getHex(), theme.fogDensity);
     this.scene.add(track.group);
 
-    // lower ambient + stronger sun = more form and shadow depth (less flat-lit)
-    const ambient = new THREE.AmbientLight(0xcfe0ff, 0.38);
+    // per-theme lighting rig (NIGHT swaps the sun for cool moonlight)
+    const L = theme.light;
+    const ambient = new THREE.AmbientLight(L.ambient, L.ambientIntensity);
     this.scene.add(ambient);
-    const hemi = new THREE.HemisphereLight(0xeaf2ff, 0x6b7a4a, 0.4);
+    const hemi = new THREE.HemisphereLight(L.hemiSky, L.hemiGround, L.hemiIntensity);
     this.scene.add(hemi);
-    const sun = new THREE.DirectionalLight(0xfff2dc, 2.0);
+    // rim/back light opposite the sun: cool edge separation on car roofs and canopies
+    const rim = new THREE.DirectionalLight(L.rim, L.rimIntensity);
+    rim.position.set(-70, 60, -50);
+    rim.castShadow = false;
+    this.scene.add(rim);
+    const sun = new THREE.DirectionalLight(L.sun, L.sunIntensity);
     sun.position.set(60, 120, 40);
     sun.castShadow = true;
     // tighter map + frustum around the player: fewer casters, crisper, far cheaper
