@@ -14,17 +14,23 @@ import { HueSaturationShader } from 'three/examples/jsm/shaders/HueSaturationSha
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
-  CARS, CUP, PLAYER_CAR_NUM, PLAYER_NAME, RIVALS, TRACKS, effectiveStats,
+  CARS, PLAYER_CAR_NUM, PLAYER_NAME, RIVALS, TRACKS,
+  cupAt, effectiveStats, liveryColors,
 } from './game/data';
-import { Profile, carUpgrades, loadProfile, resetProfile, saveProfile } from './game/save';
+import {
+  DIFFICULTY_TUNING, Profile, carUpgrades, ghostKey, loadProfile, recordLap,
+  resetProfile, saveProfile,
+} from './game/save';
 import { buildTrack } from './game/track';
-import { PlayerInput, Race, RaceResult, RacerConfig } from './game/race';
+import { PlayerInput, Race, RaceMode, RaceResult, RacerConfig } from './game/race';
 import { GameAudio } from './game/audio';
 import { PLAYER_CAR_MODELS, RIVAL_MODELS, ensureModelsLoaded } from './game/models';
 import { Hud } from './ui/hud';
 import { Screens } from './ui/screens';
 
-type GameState = 'menu' | 'tournament' | 'garage' | 'settings' | 'race' | 'results';
+type GameState =
+  | 'menu' | 'tournament' | 'garage' | 'settings' | 'race' | 'results'
+  | 'modes' | 'leaderboards';
 
 class Input {
   private down = new Set<string>();
@@ -72,6 +78,8 @@ class Game {
   private paused = false;
   private tutorialActive = false;
   private raceItemSnapshot = { missile: 0, mine: 0 };
+  private raceMode: RaceMode = 'race';
+  private raceTrackId = '';
   private camPos = new THREE.Vector3();
   private lastTime = performance.now();
   private composer: EffectComposer | null = null;
@@ -112,6 +120,9 @@ class Game {
       toTournament: () => this.toState('tournament'),
       toGarage: () => this.toState('garage'),
       toSettings: () => this.toState('settings'),
+      toModes: () => this.toState('modes'),
+      toLeaderboards: () => this.toState('leaderboards'),
+      startModeRace: (mode, trackId) => this.startModeRace(mode, trackId),
       resumeRace: () => this.setPaused(false),
       restartRace: () => this.restartRace(),
       quitRace: () => this.forfeitRace(),
@@ -280,30 +291,35 @@ class Game {
       case 'tournament': this.screens.showTournament(); break;
       case 'garage': this.screens.showGarage(); break;
       case 'settings': this.screens.showSettings(); break;
+      case 'modes': this.screens.showModes(); break;
+      case 'leaderboards': this.screens.showLeaderboards(); break;
       default: break;
     }
   }
 
   // ---------- race lifecycle ----------
-  private buildRacerConfigs(raceIndex: number): RacerConfig[] {
+  private buildRacerConfigs(raceIndex: number, soloOnly = false): RacerConfig[] {
     const p = this.profile;
     const car = CARS.find((c) => c.id === p.equipped) ?? CARS[0];
     const stats = effectiveStats(car, carUpgrades(p, car.id));
+    const paint = liveryColors(car, p.liveries[car.id]);
     const configs: RacerConfig[] = [{
       id: 'player', name: PLAYER_NAME, carNum: PLAYER_CAR_NUM,
-      color: car.color, accent: car.accent,
+      color: paint.color, accent: paint.accent,
       model: PLAYER_CAR_MODELS[car.id] ?? null,
       isPlayer: true, skill: 1,
       stats, condition: p.condition,
       items: { ...p.items },
     }];
-    // rivals scale up as the cup progresses
-    const ramp = raceIndex * 0.45;
+    if (soloOnly) return configs; // Time Trial: just the player and their ghost
+    // rivals scale up as the cup progresses; difficulty scales the ramp and skill
+    const tune = DIFFICULTY_TUNING[p.settings.difficulty];
+    const ramp = raceIndex * tune.ramp;
     for (const r of RIVALS) {
       configs.push({
         id: r.id, name: r.name, carNum: r.carNum, color: r.color, accent: r.accent,
         model: RIVAL_MODELS[r.id] ?? null,
-        isPlayer: false, skill: r.skill,
+        isPlayer: false, skill: r.skill * tune.skill,
         stats: {
           speed: 5.2 + ramp, accel: 5.6 + ramp, handling: 5.8 + ramp,
           armour: 5 + ramp, boost: 5 + ramp,
@@ -319,33 +335,55 @@ class Game {
     void this.startNextRaceAsync();
   }
 
-  private async startNextRaceAsync(): Promise<void> {
+  /** Start a one-off Time Trial or Elimination race on a chosen track. */
+  startModeRace(mode: RaceMode, trackId: string): void {
+    const def = TRACKS.find((t) => t.id === trackId) ?? TRACKS[0];
+    void this.startNextRaceAsync(mode, def.id);
+  }
+
+  private async startNextRaceAsync(mode: RaceMode = 'race', trackOverride?: string): Promise<void> {
     const p = this.profile;
-    if (p.cup.finished) { this.toState('tournament'); return; }
+    const cup = cupAt(p.cup.cupIndex);
+    if (mode === 'race' && p.cup.finished) { this.toState('tournament'); return; }
     document.getElementById('screen')!.innerHTML =
       '<div class="screen-root"><div style="flex:1"></div><h2 class="cyan">LOADING…</h2><div style="flex:1"></div></div>';
     await ensureModelsLoaded();
     // let the browser paint the LOADING screen before the synchronous build blocks
     // (setTimeout, not rAF — rAF is throttled when the tab isn't focused)
     await new Promise<void>((r) => setTimeout(r, 32));
+    this.raceMode = mode;
     const raceIndex = p.cup.raceIndex;
-    const trackDef = TRACKS.find((t) => t.id === CUP.trackIds[raceIndex]) ?? TRACKS[0];
+    const trackId = trackOverride ?? cup.trackIds[raceIndex];
+    const trackDef = TRACKS.find((t) => t.id === trackId) ?? TRACKS[0];
+    this.raceTrackId = trackDef.id;
     const tBuild = performance.now();
     const track = buildTrack(trackDef);
     const buildMs = performance.now() - tBuild;
     this.raceItemSnapshot = { ...p.items };
 
     const tRace = performance.now();
+    const car = CARS.find((c) => c.id === p.equipped) ?? CARS[0];
+    const ghost = mode === 'timetrial' && p.settings.showGhost
+      ? (p.ghosts[ghostKey(car.id, trackDef.id)] ?? null)
+      : null;
     this.race = new Race(
       track,
-      this.buildRacerConfigs(raceIndex),
+      this.buildRacerConfigs(raceIndex, mode === 'timetrial'),
       (results) => this.onRaceFinished(results),
       (n, v) => {
         this.audio.play(n, v);
         if (n === 'go') this.audio.playSample('vo-go.mp3');
         else if (n === 'finalLap') this.audio.playSample('vo-finallap.mp3');
       },
-      { weapons: p.settings.weapons }
+      {
+        weapons: p.settings.weapons,
+        mode,
+        latGrip: DIFFICULTY_TUNING[p.settings.difficulty].latGrip,
+        ghost: ghost ? { stride: ghost.stride, frames: ghost.frames } : null,
+        // Elimination needs one lap per cull, so every rival can actually be knocked
+        // out; the track's own lap count is usually shorter than the grid size.
+        laps: mode === 'elimination' ? RIVALS.length + 1 : undefined,
+      }
     );
     const raceMs = performance.now() - tRace;
     if (this.perf) {
@@ -386,7 +424,9 @@ class Game {
     if (this.race) { this.race.dispose(); this.race = null; }
     this.audio.stopEngine();
     this.hud.unmount();
-    this.startNextRace();
+    // restart the mode we're actually in — a Time Trial must not restart as a cup race
+    if (this.raceMode === 'race') this.startNextRace();
+    else this.startModeRace(this.raceMode, this.raceTrackId);
   }
 
   private forfeitRace(): void {
@@ -395,9 +435,15 @@ class Game {
     const damage = this.race ? this.race.playerDamageTaken() : 0;
     if (this.race && p.settings.weapons) p.items = this.race.playerItemsRemaining();
     p.condition = Math.max(20, p.condition - damage * 0.2);
-    p.cup.points['player'] = (p.cup.points['player'] ?? 0) + CUP.pointsByPosition[5];
+    const cup = cupAt(p.cup.cupIndex);
+    if (this.raceMode !== 'race') {   // quitting a one-off mode doesn't touch the cup
+      saveProfile(p);
+      this.toState('modes');
+      return;
+    }
+    p.cup.points['player'] = (p.cup.points['player'] ?? 0) + cup.pointsByPosition[5];
     for (let i = 0; i < RIVALS.length; i++) {
-      p.cup.points[RIVALS[i].id] = (p.cup.points[RIVALS[i].id] ?? 0) + CUP.pointsByPosition[i];
+      p.cup.points[RIVALS[i].id] = (p.cup.points[RIVALS[i].id] ?? 0) + cup.pointsByPosition[i];
     }
     this.advanceCup();
     saveProfile(p);
@@ -406,25 +452,57 @@ class Game {
 
   private onRaceFinished(results: RaceResult[]): void {
     const p = this.profile;
+    const cup = cupAt(p.cup.cupIndex);
     const playerRes = results.find((r) => r.isPlayer)!;
-    const pos = playerRes.position;
-    const points = CUP.pointsByPosition[pos - 1] ?? 0;
-    const cash = CUP.cashByPosition[pos - 1] ?? 0;
+    const trackId = this.raceTrackId;
 
+    // best lap record applies in every mode
+    if (playerRes.bestLapMs && (!p.bestTimes[trackId] || playerRes.bestLapMs < p.bestTimes[trackId])) {
+      p.bestTimes[trackId] = Math.round(playerRes.bestLapMs);
+    }
+
+    if (this.raceMode === 'timetrial') {
+      const car = CARS.find((c) => c.id === p.equipped) ?? CARS[0];
+      let rank = 0;
+      if (playerRes.bestLapMs) {
+        rank = recordLap(p, trackId, {
+          timeMs: Math.round(playerRes.bestLapMs), carId: car.id, at: Date.now(),
+        });
+        // keep the ghost only when this run beat the stored one
+        const g = this.race?.bestGhost() ?? null;
+        const key = ghostKey(car.id, trackId);
+        if (g && (!p.ghosts[key] || g.timeMs < p.ghosts[key].timeMs)) p.ghosts[key] = g;
+      }
+      saveProfile(p);
+      this.state = 'results';
+      this.audio.stopEngine();
+      this.screens.showTimeTrialResults(trackId, playerRes.bestLapMs, rank);
+      return;
+    }
+
+    const points = cup.pointsByPosition[playerRes.position - 1] ?? 0;
+    const cash = cup.cashByPosition[playerRes.position - 1] ?? 0;
     p.cash += cash;
+    p.totalEarned += cash;
+
+    if (this.raceMode === 'elimination') {
+      // standalone mode — pays out but doesn't touch cup standings
+      p.condition = Math.max(20, p.condition - playerRes.damageTaken * 0.2);
+      saveProfile(p);
+      this.state = 'results';
+      this.audio.stopEngine();
+      this.screens.showResults(results, 0, cash, false, 'elimination');
+      return;
+    }
+
     for (const r of results) {
       const key = r.isPlayer ? 'player' : r.id;
-      p.cup.points[key] = (p.cup.points[key] ?? 0) + (CUP.pointsByPosition[r.position - 1] ?? 0);
+      p.cup.points[key] = (p.cup.points[key] ?? 0) + (cup.pointsByPosition[r.position - 1] ?? 0);
     }
     // damage carries over as condition loss (forgiving rate)
     p.condition = Math.max(20, p.condition - playerRes.damageTaken * 0.2);
     if (this.race && p.settings.weapons) p.items = this.race.playerItemsRemaining();
-    // best lap record
-    const trackId = CUP.trackIds[p.cup.raceIndex];
-    if (playerRes.bestLapMs && (!p.bestTimes[trackId] || playerRes.bestLapMs < p.bestTimes[trackId])) {
-      p.bestTimes[trackId] = Math.round(playerRes.bestLapMs);
-    }
-    const isLastRace = p.cup.raceIndex >= CUP.trackIds.length - 1;
+    const isLastRace = p.cup.raceIndex >= cup.trackIds.length - 1;
     this.advanceCup();
     saveProfile(p);
 
@@ -435,13 +513,16 @@ class Game {
 
   private advanceCup(): void {
     const p = this.profile;
+    const cup = cupAt(p.cup.cupIndex);
     p.cup.raceIndex++;
-    if (p.cup.raceIndex >= CUP.trackIds.length) {
+    if (p.cup.raceIndex >= cup.trackIds.length) {
       p.cup.finished = true;
       // champion bonus
       const standings = Object.entries(p.cup.points).sort((a, b) => b[1] - a[1]);
       if (standings.length && standings[0][0] === 'player') {
-        p.cash += CUP.winBonus;
+        p.cash += cup.winBonus;
+        p.totalEarned += cup.winBonus;
+        if (!p.cupsWon.includes(cup.id)) p.cupsWon.push(cup.id);
       }
     }
   }

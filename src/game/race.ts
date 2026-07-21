@@ -1,9 +1,10 @@
-// Race simulation: arcade car physics, AI rivals, weapons, laps and positions.
+﻿// Race simulation: arcade car physics, AI rivals, weapons, laps and positions.
 
 import * as THREE from 'three';
 import { CarStats } from './data';
 import { BuiltTrack, Obstacle, nearestSample } from './track';
 import { buildAnimalMesh, buildCarMesh, buildLorryMesh, buildMineMesh, buildMissileMesh } from './carmesh';
+import { GhostLap } from './save';
 import { DEBRIS_MODELS, WheelRig, buildCarFromModel, cloneScaled } from './models';
 
 export interface RacerConfig {
@@ -129,7 +130,7 @@ interface Effect {
   life: number;
   maxLife: number;
   grow: number;
-  base: number; // base scale — size now lives on the transform, not the geometry
+  base: number; // base scale â€” size now lives on the transform, not the geometry
 }
 
 export interface HudState {
@@ -153,6 +154,21 @@ export interface HudState {
 }
 
 export type RacePhase = 'countdown' | 'racing' | 'finished';
+export type RaceMode = 'race' | 'timetrial' | 'elimination';
+
+export interface RaceOptions {
+  weapons?: boolean;
+  mode?: RaceMode;
+  /** AI cornering grip â€” difficulty scales this (see DIFFICULTY_TUNING). */
+  latGrip?: number;
+  /** Ghost lap to replay alongside the player (Time Trial only). */
+  ghost?: { stride: number; frames: number[] } | null;
+  /** Override the track's lap count (Elimination needs one lap per cull). */
+  laps?: number;
+}
+
+/** Sampling stride for ghost recording â€” every Nth frame keeps the save small. */
+export const GHOST_STRIDE = 3;
 
 const GRID_COLORS_FALLBACK = 0x888888;
 
@@ -160,13 +176,13 @@ const GRID_COLORS_FALLBACK = 0x888888;
 // dome, fog and ground edge all blend into one atmosphere.
 //
 // NOTE (measured 2026-07-21): with the current hard top-down ortho camera this dome
-// is NOT visible in gameplay — the radius-900 ground disc fills the whole frame, so
+// is NOT visible in gameplay â€” the radius-900 ground disc fills the whole frame, so
 // no horizon is ever on screen. Toggling `dome.visible` is pixel-identical. It is
 // kept deliberately because it costs ~1 occluded draw call and Phase 5's free-camera
 // photo mode WILL see it. The visible Phase-2 atmosphere comes from FogExp2 + the
 // per-theme grade, not from this. Don't "fix" the look by tweaking the dome.
 function makeSkyDome(top: THREE.Color, horizon: THREE.Color): THREE.Mesh {
-  // radius sits the camera (which roams ±~250 around origin) comfortably inside the
+  // radius sits the camera (which roams Â±~250 around origin) comfortably inside the
   // dome while staying within the ortho far plane (main.ts sets far=2200)
   const geo = new THREE.SphereGeometry(1200, 24, 12);
   const mat = new THREE.ShaderMaterial({
@@ -212,7 +228,7 @@ export class Race {
   shakeTrauma = 0;
   // ONE unit sphere shared by every explosion/spark/dust/trail puff. Owned by the
   // race (not module-level) so dispose() frees it correctly and the next race builds
-  // its own — a shared module constant would be disposed out from under race #2.
+  // its own â€” a shared module constant would be disposed out from under race #2.
   // Materials stay per-puff because updateEffects fades opacity independently.
   private fxGeo = new THREE.SphereGeometry(1, 7, 6);
   // Skid marks: ONE InstancedMesh ring buffer. They used to be 150 individual meshes
@@ -246,15 +262,34 @@ export class Race {
   private nextEventAt = 16 + Math.random() * 12;
   private lorryDone = false;
   private lastCount = -1;
+  // ---- Phase 4: modes ----
+  private mode: RaceMode = 'race';
+  private latGrip = 30;
+  /** effective lap count for this race (may differ from the track default) */
+  private laps = 3;
+  /** Time Trial: pose samples of the current lap, committed if it's a new best. */
+  private lapRecording: number[] = [];
+  private lapFrame = 0;
+  private bestLapFrames: number[] | null = null;
+  private ghostMesh: THREE.Group | null = null;
+  private ghostFrames: number[] | null = null;
+  private ghostStride = GHOST_STRIDE;
+  private eliminated = new Set<string>();
+  private lastEliminationLap = 0;
 
   constructor(
     track: BuiltTrack,
     configs: RacerConfig[],
     onFinish: (results: RaceResult[]) => void,
     sfx: (name: string, vol?: number) => void,
-    opts: { weapons: boolean } = { weapons: true }
+    opts: RaceOptions = {}
   ) {
-    this.weapons = opts.weapons;
+    this.weapons = opts.weapons ?? true;
+    this.mode = opts.mode ?? 'race';
+    this.latGrip = opts.latGrip ?? 30;
+    this.laps = opts.laps ?? track.def.laps;
+    if (this.mode !== 'race') this.weapons = false; // no weapons in TT/elimination
+    if (this.mode === 'timetrial') this.nextEventAt = Infinity; // no hazards spoiling a hot lap
     this.track = track;
     this.obstacles = track.obstacles.map((o) => ({ pos: o.pos, radius: o.radius }));
     this.onFinish = onFinish;
@@ -371,7 +406,7 @@ export class Race {
     });
     if (!this.player) this.player = this.racers[0];
 
-    // skid ring buffer — one draw call for every tyre mark on the track
+    // skid ring buffer â€” one draw call for every tyre mark on the track
     const skidGeo = new THREE.PlaneGeometry(0.45, 1.1);
     skidGeo.rotateX(-Math.PI / 2); // lie flat on the road; instances then just yaw
     this.skidMesh = new THREE.InstancedMesh(skidGeo, this.skidMat, Race.SKID_CAP);
@@ -381,11 +416,36 @@ export class Race {
     this.skidMesh.renderOrder = 1;       // draw over the road surface
     this.scene.add(this.skidMesh);
 
-    // a couple of standing oil slicks on corners from the start
+    // ghost car: translucent, non-colliding replay of the player's best lap
+    if (opts.ghost && opts.ghost.frames.length >= 3) {
+      this.ghostFrames = opts.ghost.frames;
+      this.ghostStride = Math.max(1, opts.ghost.stride);
+      const pcfg = configs.find((c) => c.isPlayer) ?? configs[0];
+      const gm = (pcfg.model ? buildCarFromModel(pcfg.model, 0x8fe8ff, '--') : null)
+        ?? buildCarMesh(0x8fe8ff, 0xffffff, '--');
+      gm.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        const src = Array.isArray(m.material) ? m.material[0] : m.material;
+        const mat = (src as THREE.Material).clone() as THREE.MeshStandardMaterial;
+        mat.transparent = true;
+        mat.opacity = 0.34;
+        mat.depthWrite = false;
+        m.material = mat;
+        m.castShadow = false;   // a ghost casting a shadow reads as a solid rival
+        m.receiveShadow = false;
+      });
+      this.ghostMesh = gm;
+      this.scene.add(gm);
+    }
+
+    // Time Trial is a clean hot-lap sandbox â€” no standing hazards
     const n = track.samples.length;
-    for (let k = 0; k < 2; k++) {
-      const idx = Math.floor(((k + 1) / 3 + Math.random() * 0.15) * n) % n;
-      this.spawnOil(idx, (Math.random() - 0.5) * track.halfWidth * 1.1);
+    if (this.mode !== 'timetrial') {
+      for (let k = 0; k < 2; k++) {
+        const idx = Math.floor(((k + 1) / 3 + Math.random() * 0.15) * n) % n;
+        this.spawnOil(idx, (Math.random() - 0.5) * track.halfWidth * 1.1);
+      }
     }
   }
 
@@ -440,13 +500,13 @@ export class Race {
     mesh.rotation.y = Math.atan2(dir.x, dir.z);
     this.scene.add(mesh);
     this.animals.push({ mesh, pos: start, dir, speed: 6, hopT: 0, fleeing: false, life: 14 });
-    this.message = '⚠ ANIMAL ON TRACK!';
+    this.message = 'âš  ANIMAL ON TRACK!';
     this.messageTime = 2.2;
     this.sfx('alert');
   }
 
   // Spawn a tanker that drives in from the verge, skids onto the track, tips over
-  // and spills oil + debris — all animated. (updateLorry drives the phases.)
+  // and spills oil + debris â€” all animated. (updateLorry drives the phases.)
   private eventLorry(): void {
     this.lorryDone = true;
     const n = this.track.samples.length;
@@ -471,7 +531,7 @@ export class Race {
       mesh: lorry, phase: 'approach', t: 0,
       startPos, crashPos, baseIdx, side, headingY, spillT: 0, spillCount: 0,
     };
-    this.message = '⚠ RUNAWAY TANKER!';
+    this.message = 'âš  RUNAWAY TANKER!';
     this.messageTime = 2.4;
     this.sfx('alert');
   }
@@ -555,7 +615,7 @@ export class Race {
     let v = 26 + r.cfg.stats.speed * 2.4;
     if (r.cfg.isPlayer) v *= 0.88 + 0.12 * (r.cfg.condition / 100);
     if (r.boosting) v *= 1.32 + r.cfg.stats.boost * 0.022;
-    if (r.offTrack) v *= 0.78; // gentle arcade penalty — grass shaves speed, doesn't kill it
+    if (r.offTrack) v *= 0.78; // gentle arcade penalty â€” grass shaves speed, doesn't kill it
     if (!r.cfg.isPlayer) v *= r.cfg.skill * r.rubber;
     return v;
   }
@@ -592,6 +652,7 @@ export class Race {
     const racing = this.phase === 'racing';
 
     for (const r of this.racers) {
+      if (this.eliminated.has(r.cfg.id)) continue; // culled: frozen and hidden
       const ctrl = r.cfg.isPlayer && !this.autopilot
         ? this.playerControls(r, input, racing)
         : this.aiControls(r, racing);
@@ -618,7 +679,54 @@ export class Race {
     this.updateMissiles(dt);
     this.updateMines(dt);
     this.updateEffects(dt);
+    if (this.mode === 'timetrial') this.updateTimeTrial(racing);
     this.checkFinishes();
+  }
+
+  // ---------- Time Trial: record the current lap, replay the stored ghost ----------
+  private updateTimeTrial(racing: boolean): void {
+    if (!racing) return;
+    const p = this.player;
+    // record: sample the pose every GHOST_STRIDE frames
+    if (this.lapFrame % GHOST_STRIDE === 0) {
+      this.lapRecording.push(p.pos.x, p.pos.z, p.heading);
+    }
+    // replay: walk the stored ghost at the same cadence, lerping between samples
+    if (this.ghostMesh && this.ghostFrames) {
+      const triples = this.ghostFrames.length / 3;
+      const t = this.lapFrame / this.ghostStride;
+      const i0 = Math.floor(t);
+      if (i0 >= triples - 1) {
+        this.ghostMesh.visible = false; // ghost already finished â€” it was quicker
+      } else {
+        const f = t - i0, a = i0 * 3, b = (i0 + 1) * 3;
+        const g = this.ghostFrames;
+        this.ghostMesh.visible = true;
+        this.ghostMesh.position.set(
+          g[a] + (g[b] - g[a]) * f, 0,
+          g[a + 1] + (g[b + 1] - g[a + 1]) * f
+        );
+        // shortest-arc heading interpolation so the ghost doesn't spin at the wrap
+        let dh = g[b + 2] - g[a + 2];
+        while (dh > Math.PI) dh -= Math.PI * 2;
+        while (dh < -Math.PI) dh += Math.PI * 2;
+        this.ghostMesh.rotation.y = g[a + 2] + dh * f;
+      }
+    }
+    this.lapFrame++;
+  }
+
+  /** Called on a completed lap: keep the recording if it was the player's best. */
+  private commitLapRecording(wasBest: boolean): void {
+    if (wasBest && this.lapRecording.length >= 3) this.bestLapFrames = this.lapRecording.slice();
+    this.lapRecording = [];
+    this.lapFrame = 0;
+  }
+
+  /** Best-lap ghost captured this session, ready to persist. */
+  bestGhost(): GhostLap | null {
+    if (!this.bestLapFrames || this.player.bestLapMs === null) return null;
+    return { timeMs: Math.round(this.player.bestLapMs), stride: GHOST_STRIDE, frames: this.bestLapFrames };
   }
 
   // ---------- controls ----------
@@ -652,7 +760,27 @@ export class Race {
     const lookahead = 8 + Math.abs(r.speed) * 0.5;
     const tIdx = (r.sampleIdx + Math.max(4, Math.round(lookahead / track.segLength))) % n;
     const ts = track.samples[tIdx];
-    const offset = THREE.MathUtils.clamp(r.aiOffset, -track.halfWidth * 0.55, track.halfWidth * 0.55);
+    let offset = THREE.MathUtils.clamp(r.aiOffset, -track.halfWidth * 0.55, track.halfWidth * 0.55);
+
+    // Obstacle avoidance: bias the target line laterally around anything solid sitting
+    // near the road ahead (roadside props, bridge pillars, and above all the tanker
+    // wreck, which lands ACROSS the racing line). Without this the AI drives straight
+    // into it and â€” before the clear-respawn fix â€” could crash-loop forever.
+    for (let k = 4; k < 28; k += 4) {
+      const s2 = track.samples[(r.sampleIdx + k) % n];
+      for (const o of this.obstacles) {
+        const dx = o.pos.x - s2.pos.x, dz = o.pos.z - s2.pos.z;
+        if (dx * dx + dz * dz > 100) continue; // not near the line at this point
+        const oLat = dx * s2.normal.x + dz * s2.normal.z;
+        const clearance = o.radius + 2.4;
+        if (Math.abs(oLat - offset) < clearance) {
+          // pass on whichever side keeps us closer to the middle of the road
+          const left = oLat + clearance, right = oLat - clearance;
+          offset = Math.abs(left) < Math.abs(right) ? left : right;
+          offset = THREE.MathUtils.clamp(offset, -track.halfWidth * 0.88, track.halfWidth * 0.88);
+        }
+      }
+    }
     const target = ts.pos.clone().add(ts.normal.clone().multiplyScalar(offset));
     const dx = target.x - r.pos.x, dz = target.z - r.pos.z;
     const desired = Math.atan2(dx, dz);
@@ -666,7 +794,7 @@ export class Race {
     for (let k = 4; k < 30; k += 4) {
       maxCurv = Math.max(maxCurv, track.samples[(r.sampleIdx + k) % n].curvature);
     }
-    const latGrip = 30 * r.cfg.skill;
+    const latGrip = this.latGrip * r.cfg.skill;
     const cornerSpeed = maxCurv > 0.001 ? Math.sqrt(latGrip / maxCurv) : 999;
     const targetSpeed = Math.min(this.maxSpeedOf(r), cornerSpeed);
 
@@ -704,6 +832,36 @@ export class Race {
     return { throttle, brake, steer, boost, missile, mine };
   }
 
+  /**
+   * Find a spot on the racing line that is clear of every solid obstacle, searching
+   * forward along the track and trying a couple of lateral offsets at each step.
+   * Falls back to the raw sample if the track is somehow fully blocked.
+   */
+  private clearRespawn(startIdx: number): { pos: THREE.Vector3; heading: number } {
+    const n = this.track.samples.length;
+    const hw = this.track.halfWidth;
+    for (let step = 0; step < 40; step++) {
+      const s = this.track.samples[(startIdx + step * 3) % n];
+      for (const lat of [0, hw * 0.55, -hw * 0.55]) {
+        const p = s.pos.clone().addScaledVector(s.normal, lat);
+        let clear = true;
+        for (const o of this.obstacles) {
+          const dx = p.x - o.pos.x, dz = p.z - o.pos.z;
+          const rr = o.radius + 2.2; // margin comfortably beyond the 1.0 collision pad
+          if (dx * dx + dz * dz < rr * rr) { clear = false; break; }
+        }
+        if (clear) {
+          p.y = 0;
+          return { pos: p, heading: Math.atan2(s.tangent.x, s.tangent.z) };
+        }
+      }
+    }
+    const s = this.track.samples[startIdx % n];
+    const pos = s.pos.clone();
+    pos.y = 0;
+    return { pos, heading: Math.atan2(s.tangent.x, s.tangent.z) };
+  }
+
   // ---------- physics ----------
   private stepRacer(
     r: Racer,
@@ -719,9 +877,13 @@ export class Race {
       r.mesh.visible = Math.floor(r.crash * 12) % 2 === 0;
       if (r.crash <= 0) {
         r.sampleIdx = nearestSample(this.track, r.pos, r.sampleIdx);
-        const s = this.track.samples[r.sampleIdx];
-        r.pos.copy(s.pos); r.pos.y = 0;
-        r.heading = Math.atan2(s.tangent.x, s.tangent.z);
+        // Respawn CLEAR of solid obstacles. Dropping the car back on the track centre
+        // is not safe: the tanker wreck (radius 3.4) sits across the racing line, so a
+        // centre respawn lands inside it and the car crashes again the moment it moves
+        // â€” an infinite crash loop that permanently stalls the racer.
+        const spawn = this.clearRespawn(r.sampleIdx);
+        r.pos.copy(spawn.pos);
+        r.heading = spawn.heading;
         r.vel.set(0, 0, 0);
         r.speed = 0;
         r.mesh.visible = true;
@@ -776,7 +938,7 @@ export class Race {
         if (dx * dx + dz * dz < rr * rr) { this.crashRacer(r); break; }
       }
     }
-    if (r.crash > 0) return; // crashed this frame — freeze handled next frame
+    if (r.crash > 0) return; // crashed this frame â€” freeze handled next frame
 
     // stun (spin-out)
     if (r.stun > 0) {
@@ -913,12 +1075,15 @@ export class Race {
       r.lap++;
       if (this.phase === 'racing') {
         const lapMs = (this.raceTime - r.lapStart) * 1000;
-        if (lapMs > 4000 && (r.bestLapMs === null || lapMs < r.bestLapMs)) r.bestLapMs = lapMs;
+        const isBest = lapMs > 4000 && (r.bestLapMs === null || lapMs < r.bestLapMs);
+        if (isBest) r.bestLapMs = lapMs;
         r.lapStart = this.raceTime;
-        if (r.cfg.isPlayer && r.lap < this.track.def.laps) {
-          this.message = `LAP ${r.lap + 1} / ${this.track.def.laps}`;
+        if (this.mode === 'timetrial' && r.cfg.isPlayer) this.commitLapRecording(isBest);
+        if (this.mode === 'elimination' && r.cfg.isPlayer) this.cullLastPlace(r.lap);
+        if (r.cfg.isPlayer && r.lap < this.laps) {
+          this.message = `LAP ${r.lap + 1} / ${this.laps}`;
           this.messageTime = 1.6;
-          if (r.lap === this.track.def.laps - 1) {
+          if (r.lap === this.laps - 1) {
             this.message = 'FINAL LAP!';
             this.sfx('finalLap');
           } else {
@@ -926,7 +1091,7 @@ export class Race {
           }
         }
       }
-      if (r.lap >= this.track.def.laps && !r.finished) {
+      if (r.lap >= this.laps && !r.finished) {
         r.finished = true;
         r.finishTime = this.raceTime;
         this.finishedOrder.push(r);
@@ -939,10 +1104,40 @@ export class Race {
     r.progress = r.lap + frac;
   }
 
+  /**
+   * Elimination: when the leader starts a new lap, the racer in last place is out.
+   * Never culls the player on the lap they'd otherwise win, and never empties the
+   * grid â€” we always leave at least two cars running.
+   */
+  private cullLastPlace(lap: number): void {
+    if (lap <= this.lastEliminationLap) return;
+    this.lastEliminationLap = lap;
+    const alive = this.racers.filter((r) => !this.eliminated.has(r.cfg.id) && !r.finished);
+    if (alive.length <= 1) return; // last one standing — nothing left to cull
+    const order = alive.slice().sort((a, b) => b.progress - a.progress);
+    const doomed = order[order.length - 1];
+    this.eliminated.add(doomed.cfg.id);
+    doomed.mesh.visible = false;
+    doomed.finished = true;
+    doomed.finishTime = this.raceTime;
+    // classify eliminated racers behind everyone still running
+    this.finishedOrder.unshift(doomed);
+    if (doomed.cfg.isPlayer) {
+      this.message = 'âŒ ELIMINATED';
+      this.messageTime = 2.4;
+      this.sfx('wreck');
+    } else {
+      this.message = `${doomed.cfg.name} ELIMINATED`;
+      this.messageTime = 1.8;
+      this.sfx('alert');
+    }
+  }
+
   private resolveCarCollisions(dt: number): void {
     for (let i = 0; i < this.racers.length; i++) {
       for (let j = i + 1; j < this.racers.length; j++) {
         const a = this.racers[i], b = this.racers[j];
+        if (this.eliminated.has(a.cfg.id) || this.eliminated.has(b.cfg.id)) continue;
         const delta = new THREE.Vector3().subVectors(b.pos, a.pos);
         delta.y = 0;
         const dist = delta.length();
@@ -1084,7 +1279,7 @@ export class Race {
     if (r.cfg.isPlayer) {
       this.sfx('wreck');
       this.addShake(0.9);
-      this.message = '💥 CRASH!';
+      this.message = 'ðŸ’¥ CRASH!';
       this.messageTime = 1.4;
     }
   }
@@ -1199,6 +1394,15 @@ export class Race {
 
   private checkFinishes(): void {
     if (this.phase !== 'racing') return;
+    // Elimination ends the moment one racer is left standing, even mid-lap
+    if (this.mode === 'elimination') {
+      const alive = this.racers.filter((r) => !this.eliminated.has(r.cfg.id));
+      if (alive.length === 1 && !alive[0].finished) {
+        alive[0].finished = true;
+        alive[0].finishTime = this.raceTime;
+        this.finishedOrder.push(alive[0]);
+      }
+    }
     if (this.player.finished) {
       this.phase = 'finished';
       // estimate finishing times for anyone still on track from their average pace,
@@ -1210,7 +1414,7 @@ export class Race {
           timeMs = (r.finishTime ?? 0) * 1000;
         } else {
           estimated = true;
-          const remaining = Math.max(0, this.track.def.laps - r.progress) * this.track.totalLength;
+          const remaining = Math.max(0, this.laps - r.progress) * this.track.totalLength;
           const avgSpeed = Math.max(8, (r.progress * this.track.totalLength) / Math.max(1, this.raceTime));
           timeMs = (this.raceTime + remaining / avgSpeed) * 1000;
         }
@@ -1264,8 +1468,8 @@ export class Race {
     return {
       position: playerRank,
       racerCount: this.racers.length,
-      lap: Math.min(this.player.lap + 1, this.track.def.laps),
-      laps: this.track.def.laps,
+      lap: Math.min(this.player.lap + 1, this.laps),
+      laps: this.laps,
       raceTimeMs: this.raceTime * 1000,
       bestLapMs: this.player.bestLapMs,
       speedKmh: Math.round(Math.abs(this.player.speed) * 3.6),

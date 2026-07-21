@@ -58,7 +58,72 @@ export const CARS: CarSpec[] = [
     base: { speed: 9.6, accel: 9.0, handling: 9.2, armour: 8.0, boost: 9.4 },
     blurb: 'The legend. Unmatched.',
   },
+  // --- Phase 4 roster: the remaining Kenney silhouettes, so every body is playable ---
+  {
+    id: 'cab-12', name: 'Cab-12', tier: 1, price: 24000,
+    color: 0xf2b33d, accent: 0x1a1a1a,
+    base: { speed: 5.0, accel: 6.4, handling: 6.6, armour: 5.5, boost: 5.0 },
+    blurb: 'Cheap, chuckable, surprisingly quick.',
+  },
+  {
+    id: 'hauler', name: 'Hauler', tier: 2, price: 78000,
+    color: 0x3f9e5a, accent: 0xf2f2f2,
+    base: { speed: 6.2, accel: 5.4, handling: 5.2, armour: 9.0, boost: 6.0 },
+    blurb: 'Wins arguments. Loses corners.',
+  },
+  {
+    id: 'courier', name: 'Courier', tier: 2, price: 96000,
+    color: 0xdd6b3a, accent: 0x2a2e38,
+    base: { speed: 6.6, accel: 6.8, handling: 6.0, armour: 7.5, boost: 6.4 },
+    blurb: 'Always on time. Never on line.',
+  },
+  {
+    id: 'enforcer', name: 'Enforcer', tier: 3, price: 178000,
+    color: 0x1c2740, accent: 0xe8e8e8,
+    base: { speed: 8.0, accel: 7.8, handling: 7.2, armour: 8.5, boost: 7.0 },
+    blurb: 'Pit manoeuvre as a lifestyle.',
+  },
+  {
+    id: 'drifter', name: 'Drifter', tier: 4, price: 268000,
+    color: 0x22b3a4, accent: 0xffe066,
+    base: { speed: 8.6, accel: 8.2, handling: 9.4, armour: 6.0, boost: 8.2 },
+    blurb: 'Sideways is the fast way.',
+  },
+  {
+    id: 'apex', name: 'Apex', tier: 5, price: 540000,
+    color: 0xf2f2f2, accent: 0xff2975,
+    base: { speed: 9.8, accel: 9.4, handling: 8.8, armour: 7.0, boost: 9.6 },
+    blurb: 'Qualifying trim, every lap.',
+  },
 ];
+
+/** Paint jobs, usable on any car. `color: null` = keep the car's factory colour. */
+export interface LiverySpec {
+  id: string;
+  name: string;
+  price: number;
+  color: number | null;
+  accent: number | null;
+}
+
+export const LIVERIES: LiverySpec[] = [
+  { id: 'factory',  name: 'Factory',   price: 0,     color: null,     accent: null },
+  { id: 'midnight', name: 'Midnight',  price: 12000, color: 0x14161f, accent: 0x2de2e6 },
+  { id: 'ember',    name: 'Ember',     price: 14000, color: 0xd93a1e, accent: 0xffc83d },
+  { id: 'arctic',   name: 'Arctic',    price: 14000, color: 0xe8f1f8, accent: 0x3a76c2 },
+  { id: 'toxic',    name: 'Toxic',     price: 18000, color: 0x8ede2a, accent: 0x1a1a1a },
+  { id: 'vapor',    name: 'Vapor',     price: 22000, color: 0xb14ae0, accent: 0x2de2e6 },
+  { id: 'gold',     name: 'Gold Leaf', price: 40000, color: 0xe0b23a, accent: 0x1a1a1a },
+];
+
+/** Resolve a car's display colours through its selected livery. */
+export function liveryColors(car: CarSpec, liveryId: string | undefined): { color: number; accent: number } {
+  const lv = LIVERIES.find((l) => l.id === liveryId);
+  return {
+    color: lv?.color ?? car.color,
+    accent: lv?.accent ?? car.accent,
+  };
+}
 
 export interface UpgradeSpec {
   id: UpgradeId;
@@ -273,6 +338,73 @@ export const TRACKS: TrackDef[] = [
     ],
     theme: SNOW,
   },
+  // --- Phase 4 additions: wider mix of long straights, hairpins and fast sweepers ---
+  {
+    id: 'sunset-mile', name: 'Sunset Mile', subtitle: 'Coastal Straightaway',
+    laps: 4, width: 12, scale: 1.5, difficulty: 'EASY',
+    points: [
+      [0, 0], [80, -6], [150, 4], [200, 40], [185, 85],
+      [120, 96], [40, 88], [-40, 96], [-110, 80], [-140, 40],
+      [-120, 0], [-60, -12],
+    ],
+    theme: DESERT,
+  },
+  {
+    id: 'pine-hairpins', name: 'Pine Hairpins', subtitle: 'Forest Switchbacks',
+    laps: 5, width: 9, scale: 1.25, difficulty: 'HARD',
+    tunnel: [0.4, 0.5],
+    points: [
+      [0, 0], [50, -18], [78, 12], [40, 34], [78, 58],
+      [40, 82], [80, 108], [30, 128], [-30, 118], [-64, 140],
+      [-104, 112], [-70, 82], [-108, 56], [-72, 30], [-104, 2], [-52, -22],
+    ],
+    theme: FOREST,
+  },
+  {
+    id: 'midnight-mall', name: 'Midnight Mall', subtitle: 'Neon Retail Park',
+    laps: 5, width: 10, scale: 1.3, difficulty: 'MEDIUM',
+    bridges: [0.3, 0.66],
+    points: [
+      [0, 0], [62, -14], [112, 16], [128, 62], [96, 104],
+      [40, 116], [-16, 104], [-64, 120], [-108, 88], [-96, 42],
+      [-124, 6], [-72, -20],
+    ],
+    theme: NIGHT,
+  },
+  {
+    id: 'dune-sweep', name: 'Dune Sweep', subtitle: 'Open Desert Sweepers',
+    laps: 5, width: 12, scale: 1.55, difficulty: 'EASY',
+    points: [
+      [0, 0], [72, -20], [138, 6], [168, 56], [140, 108],
+      [76, 128], [8, 116], [-56, 130], [-124, 106], [-152, 54],
+      [-128, 4], [-64, -18],
+    ],
+    theme: DESERT,
+  },
+  {
+    id: 'icebreaker', name: 'Icebreaker', subtitle: 'Frozen Harbour',
+    laps: 6, width: 9, scale: 1.35, difficulty: 'HARD',
+    tunnel: [0.22, 0.34],
+    bridges: [0.58],
+    points: [
+      [0, 0], [58, -20], [104, 4], [86, 46], [126, 74],
+      [104, 118], [52, 106], [22, 140], [-34, 126], [-58, 84],
+      [-104, 96], [-124, 50], [-82, 24], [-98, -16], [-46, -30],
+    ],
+    theme: SNOW,
+  },
+  {
+    id: 'grand-overdrive', name: 'Grand Overdrive', subtitle: 'Championship Finale',
+    laps: 7, width: 10, scale: 1.6, difficulty: 'HARD',
+    tunnel: [0.5, 0.6],
+    bridges: [0.18, 0.8],
+    points: [
+      [0, 0], [70, -16], [130, 10], [150, 58], [118, 100],
+      [140, 142], [88, 168], [24, 150], [-30, 168], [-92, 146],
+      [-118, 100], [-86, 62], [-130, 30], [-100, -14], [-44, -26],
+    ],
+    theme: NIGHT,
+  },
 ];
 
 export interface RivalDef {
@@ -295,13 +427,52 @@ export const RIVALS: RivalDef[] = [
 export const PLAYER_CAR_NUM = '47';
 export const PLAYER_NAME = 'YOU';
 
-export const CUP = {
-  name: 'OVERDRIVE CUP 2026',
-  trackIds: ['dockyard-dash', 'forest-run', 'canyon-run', 'glacier-gate', 'frostbite-loop', 'neon-boulevard'],
-  pointsByPosition: [10, 8, 6, 4, 2, 1],
-  cashByPosition: [6000, 4200, 3000, 2200, 1500, 1000],
-  winBonus: 25000, // cup winner bonus
-};
+export interface CupDef {
+  id: string;
+  name: string;
+  trackIds: string[];
+  pointsByPosition: number[];
+  cashByPosition: number[];
+  winBonus: number;
+  /** cash you must have earned in total before this cup unlocks (0 = always open) */
+  unlockCash: number;
+}
+
+export const CUPS: CupDef[] = [
+  {
+    id: 'rookie', name: 'ROOKIE CUP',
+    trackIds: ['sunset-mile', 'dockyard-dash', 'dune-sweep', 'forest-run'],
+    pointsByPosition: [10, 8, 6, 4, 2, 1],
+    cashByPosition: [4000, 2800, 2000, 1500, 1000, 700],
+    winBonus: 15000,
+    unlockCash: 0,
+  },
+  {
+    id: 'street', name: 'STREET CUP',
+    trackIds: ['canyon-run', 'midnight-mall', 'glacier-gate', 'pine-hairpins', 'neon-boulevard'],
+    pointsByPosition: [10, 8, 6, 4, 2, 1],
+    cashByPosition: [6000, 4200, 3000, 2200, 1500, 1000],
+    winBonus: 25000,
+    unlockCash: 40000,
+  },
+  {
+    id: 'overdrive', name: 'OVERDRIVE CUP 2026',
+    trackIds: ['icebreaker', 'frostbite-loop', 'canyon-run', 'pine-hairpins', 'neon-boulevard', 'grand-overdrive'],
+    pointsByPosition: [12, 9, 7, 5, 3, 1],
+    cashByPosition: [9000, 6500, 4800, 3400, 2400, 1600],
+    winBonus: 50000,
+    unlockCash: 140000,
+  },
+];
+
+/** The cup a profile is currently contesting (clamped — save data may predate a cup). */
+export function cupAt(index: number): CupDef {
+  return CUPS[Math.min(Math.max(index, 0), CUPS.length - 1)];
+}
+
+export function cupUnlocked(cup: CupDef, totalEarned: number): boolean {
+  return totalEarned >= cup.unlockCash;
+}
 
 export function effectiveStats(car: CarSpec, upg: Record<UpgradeId, number>): CarStats {
   return {

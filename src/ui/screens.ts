@@ -2,11 +2,14 @@
 
 import * as THREE from 'three';
 import {
-  CARS, CUP, ITEM_PRICES, PLAYER_CAR_NUM, PLAYER_NAME, REPAIR_PRICE_PER_PCT, RIVALS, TRACKS,
-  TrackDef, UPGRADES, effectiveStats, upgradeCost,
+  CARS, CUPS, ITEM_PRICES, LIVERIES, PLAYER_CAR_NUM, PLAYER_NAME, REPAIR_PRICE_PER_PCT,
+  RIVALS, TRACKS, TrackDef, UPGRADES, cupAt, cupUnlocked, effectiveStats, liveryColors,
+  upgradeCost,
 } from '../game/data';
-import { Profile, carUpgrades, freshCup, resetProfile, saveProfile } from '../game/save';
-import { RaceResult } from '../game/race';
+import {
+  Difficulty, Profile, carUpgrades, freshCup, resetProfile, saveProfile,
+} from '../game/save';
+import { RaceMode, RaceResult } from '../game/race';
 import { PLAYER_CAR_MODELS, RIVAL_MODELS, buildCarFromModel } from '../game/models';
 import { buildCarMesh } from '../game/carmesh';
 import { MiniStage } from './ministage';
@@ -17,6 +20,9 @@ export interface ScreenActions {
   toTournament(): void;
   toGarage(): void;
   toSettings(): void;
+  toModes(): void;
+  toLeaderboards(): void;
+  startModeRace(mode: RaceMode, trackId: string): void;
   resumeRace(): void;
   restartRace(): void;
   quitRace(): void;
@@ -198,7 +204,9 @@ export class Screens {
       cupDone ? 'CUP RESULTS' : cupStarted ? 'CONTINUE TOURNAMENT ⟫' : 'START TOURNAMENT ⟫',
       'primary', () => cupDone ? this.showCupComplete() : this.actions.toTournament()
     ));
+    list.appendChild(this.btn('SINGLE EVENTS', '', () => this.actions.toModes()));
     list.appendChild(this.btn('GARAGE & SHOP', '', () => this.actions.toGarage()));
+    list.appendChild(this.btn('LEADERBOARDS', '', () => this.actions.toLeaderboards()));
     list.appendChild(this.btn('SETTINGS', '', () => this.actions.toSettings()));
     div.appendChild(list);
     const spacer = document.createElement('div');
@@ -224,15 +232,46 @@ export class Screens {
     this.applyBg(div, 'cup-bg.png');
     this.topbar(div, 'TOURNAMENT');
 
+    const cup = cupAt(p.cup.cupIndex);
     const sub = document.createElement('div');
     sub.style.cssText = 'width:100%;max-width:1180px;margin-bottom:14px';
-    const total = CUP.trackIds.length;
-    sub.innerHTML = `<h3 class="cyan">${CUP.name} — RACE ${Math.min(p.cup.raceIndex + 1, total)} / ${total}</h3>`;
+    const total = cup.trackIds.length;
+    sub.innerHTML = `<h3 class="cyan">${cup.name} — RACE ${Math.min(p.cup.raceIndex + 1, total)} / ${total}</h3>`;
     div.appendChild(sub);
+
+    // cup selector — switching cups resets that cup's standings, so confirm first
+    const picker = document.createElement('div');
+    picker.style.cssText = 'display:flex;gap:8px;width:100%;max-width:1180px;margin-bottom:12px;flex-wrap:wrap';
+    CUPS.forEach((c, ci) => {
+      const unlocked = cupUnlocked(c, p.totalEarned);
+      const active = ci === p.cup.cupIndex;
+      const won = p.cupsWon.includes(c.id);
+      const b = this.btn(
+        `${won ? '🏆 ' : unlocked ? '' : '🔒 '}${c.name}`,
+        'small' + (active ? ' primary' : ''),
+        () => {
+          if (!unlocked) {
+            alert(`Locked — earn ${money(c.unlockCash)} in total prize money to enter.\nYou have earned ${money(p.totalEarned)}.`);
+            this.actions.sfx('deny');
+            return;
+          }
+          if (active) return;
+          if (p.cup.raceIndex > 0 && !p.cup.finished &&
+              !confirm(`Switch to ${c.name}? Your current cup standings will be reset.`)) return;
+          p.cup = freshCup(ci);
+          saveProfile(p);
+          this.actions.sfx('buy');
+          this.showTournament();
+        }
+      );
+      if (!unlocked) b.style.opacity = '0.55';
+      picker.appendChild(b);
+    });
+    div.appendChild(picker);
 
     const grid = document.createElement('div');
     grid.className = 'race-grid';
-    CUP.trackIds.forEach((tid, i) => {
+    cup.trackIds.forEach((tid, i) => {
       const track = TRACKS.find((t) => t.id === tid)!;
       const card = document.createElement('div');
       const state = i < p.cup.raceIndex ? 'done' : i === p.cup.raceIndex ? 'current' : 'locked';
@@ -269,7 +308,7 @@ export class Screens {
     const side = document.createElement('div');
     side.style.cssText = 'display:flex;flex-direction:column;gap:10px;width:300px';
     if (!p.cup.finished) {
-      const next = TRACKS.find((t) => t.id === CUP.trackIds[p.cup.raceIndex])!;
+      const next = TRACKS.find((t) => t.id === cup.trackIds[p.cup.raceIndex])!;
       side.appendChild(this.btn(`▶ RACE: ${next.name.toUpperCase()}`, 'primary', () => this.actions.startNextRace()));
     }
     side.appendChild(this.btn('GARAGE & SHOP', '', () => this.actions.toGarage()));
@@ -277,7 +316,7 @@ export class Screens {
     if (p.cup.raceIndex > 0 || p.cup.finished) {
       side.appendChild(this.btn('↻ RESTART CUP (RACE 1)', 'small', () => {
         if (confirm('Restart the cup from Race 1? Cup points reset; cash & cars are kept.')) {
-          p.cup = freshCup();
+          p.cup = freshCup(p.cup.cupIndex);
           saveProfile(p);
           this.showTournament();
         }
@@ -335,13 +374,14 @@ export class Screens {
     const centre = document.createElement('div');
     centre.className = 'panel';
     centre.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px';
+    const paint = liveryColors(car, p.liveries[car.id]);
     const glow = document.createElement('div');
     glow.style.cssText = `width:100%;border-radius:10px;background:
-      radial-gradient(ellipse at 50% 65%, ${hex(car.color)}33 0%, #11151f00 70%);
+      radial-gradient(ellipse at 50% 65%, ${hex(paint.color)}33 0%, #11151f00 70%);
       display:flex;align-items:center;justify-content:center`;
     const stage = this.makeStage(340, 190);
     const pivot = new THREE.Group();
-    pivot.add(this.frontEndCar(PLAYER_CAR_MODELS[car.id] ?? null, car.color, car.accent, PLAYER_CAR_NUM));
+    pivot.add(this.frontEndCar(PLAYER_CAR_MODELS[car.id] ?? null, paint.color, paint.accent, PLAYER_CAR_NUM));
     stage.scene.add(pivot);
     stage.start((_dt, t) => {
       pivot.rotation.y = t * 0.55;                 // slow showroom spin
@@ -354,6 +394,42 @@ export class Screens {
     eq.style.fontWeight = '700';
     eq.textContent = '✔ EQUIPPED';
     centre.appendChild(eq);
+
+    // --- livery picker: buy once, then applies to any car ---
+    const lvTitle = document.createElement('div');
+    lvTitle.className = 'section-title';
+    lvTitle.style.marginTop = '4px';
+    lvTitle.textContent = 'PAINT';
+    centre.appendChild(lvTitle);
+    const lvRow = document.createElement('div');
+    lvRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;justify-content:center';
+    const currentLivery = p.liveries[car.id] ?? 'factory';
+    for (const lv of LIVERIES) {
+      const owned = p.ownedLiveries.includes(lv.id);
+      const active = lv.id === currentLivery;
+      const sw = document.createElement('button');
+      const swatch = lv.color ?? car.color;
+      sw.title = owned ? lv.name : `${lv.name} — ${money(lv.price)}`;
+      sw.style.cssText = `pointer-events:auto;width:30px;height:30px;border-radius:6px;cursor:pointer;
+        background:${hex(swatch)};border:2px solid ${active ? '#2de2e6' : '#00000044'};
+        opacity:${owned ? 1 : 0.45};position:relative`;
+      if (!owned) sw.textContent = '🔒';
+      sw.addEventListener('click', () => {
+        if (!owned) {
+          if (p.cash < lv.price) { this.actions.sfx('deny'); alert(`Not enough cash for ${lv.name} (${money(lv.price)}).`); return; }
+          p.cash -= lv.price;
+          p.ownedLiveries.push(lv.id);
+          this.actions.sfx('buy');
+        } else {
+          this.actions.sfx('click');
+        }
+        p.liveries[car.id] = lv.id;
+        saveProfile(p);
+        this.showGarage();
+      });
+      lvRow.appendChild(sw);
+    }
+    centre.appendChild(lvRow);
     grid.appendChild(centre);
 
     // right: upgrades
@@ -544,6 +620,30 @@ export class Screens {
     });
     mkRow('GRAPHICS QUALITY', quality);
 
+    const diff = document.createElement('select');
+    diff.style.cssText = 'pointer-events:auto;padding:4px 8px;font-weight:700;background:#12141c;color:#e8e8ee;border:1px solid #2de2e6;border-radius:6px';
+    for (const [val, label] of [['easy', 'EASY'], ['normal', 'NORMAL'], ['hard', 'HARD']] as const) {
+      const opt = document.createElement('option');
+      opt.value = val; opt.textContent = label;
+      if (p.settings.difficulty === val) opt.selected = true;
+      diff.appendChild(opt);
+    }
+    diff.addEventListener('change', () => {
+      p.settings.difficulty = diff.value as Difficulty;
+      saveProfile(p); this.actions.applySettings();
+    });
+    mkRow('DIFFICULTY', diff);
+
+    const ghost = document.createElement('input');
+    ghost.type = 'checkbox';
+    ghost.checked = p.settings.showGhost;
+    ghost.style.cssText = 'pointer-events:auto;width:20px;height:20px;accent-color:#ff2975';
+    ghost.addEventListener('change', () => {
+      p.settings.showGhost = ghost.checked;
+      saveProfile(p); this.actions.applySettings();
+    });
+    mkRow('TIME TRIAL GHOST', ghost);
+
     const resetBtn = this.btn('RESET SAVE DATA', 'small', () => {
       if (confirm('Delete all progress and start fresh?')) {
         this.actions.profileReset();
@@ -562,18 +662,25 @@ export class Screens {
   }
 
   // ---------------- race results ----------------
-  showResults(results: RaceResult[], pointsEarned: number, cashEarned: number, isLastRace: boolean): void {
+  showResults(
+    results: RaceResult[], pointsEarned: number, cashEarned: number,
+    isLastRace: boolean, mode: RaceMode = 'race'
+  ): void {
     this.clear();
     const div = document.createElement('div');
     div.className = 'screen-root overlay';
     const playerRow = results.find((r) => r.isPlayer)!;
     const won = playerRow.position === 1;
+    const elim = mode === 'elimination';
+    const heading = elim
+      ? (won ? '🏆 LAST ONE STANDING!' : `ELIMINATED — P${playerRow.position}`)
+      : (won ? '🏆 RACE WON!' : `RACE FINISHED — P${playerRow.position}`);
     div.innerHTML = `
       <div style="flex:0.5"></div>
-      <h2 style="font-size:34px" class="${won ? 'gold trophy-pop' : 'cyan'}">
-        ${won ? '🏆 RACE WON!' : `RACE FINISHED — P${playerRow.position}`}
-      </h2>
-      <div class="muted" style="margin:6px 0 18px">+${pointsEarned} cup points · <span class="green">${money(cashEarned)}</span> prize money</div>`;
+      <h2 style="font-size:34px" class="${won ? 'gold trophy-pop' : 'cyan'}">${heading}</h2>
+      <div class="muted" style="margin:6px 0 18px">${
+        elim ? '' : `+${pointsEarned} cup points · `
+      }<span class="green">${money(cashEarned)}</span> prize money</div>`;
     if (won) { this.confetti(div); this.actions.sfx('fanfare'); this.actions.sfx('voice:win'); }
 
     // podium: top-3 cars on blocks, slow camera arc behind the HTML overlay
@@ -627,7 +734,7 @@ export class Screens {
         <td><span class="car-num" style="background:${hex(r.color)};padding:1px 8px;border-radius:2px;font-weight:800;margin-right:8px">${r.carNum}</span>${r.name}</td>
         <td style="text-align:right">${r.estimated ? '≈ ' : ''}${fmtTime(r.timeMs)}</td>
         <td style="text-align:right" class="muted">${r.bestLapMs ? 'best ' + fmtTime(r.bestLapMs) : ''}</td>
-        <td style="text-align:right;font-weight:700">+${CUP.pointsByPosition[r.position - 1] ?? 0} pts</td>`;
+        <td style="text-align:right;font-weight:700">+${cupAt(this.profile.cup.cupIndex).pointsByPosition[r.position - 1] ?? 0} pts</td>`;
       table.appendChild(tr);
     };
     results.forEach((r, i) => {
@@ -644,12 +751,18 @@ export class Screens {
       skip.style.display = 'none';
     });
     actions.appendChild(skip);
-    actions.appendChild(this.btn(
-      isLastRace ? 'CUP RESULTS ⟫' : 'CONTINUE ⟫', 'primary',
-      () => isLastRace ? this.showCupComplete() : this.actions.toTournament()
-    ));
-    if (!isLastRace) {
-      actions.appendChild(this.btn('GARAGE', '', () => this.actions.toGarage()));
+    if (elim) {
+      // standalone event — return to the events list, not the cup flow
+      actions.appendChild(this.btn('EVENTS ⟫', 'primary', () => this.actions.toModes()));
+      actions.appendChild(this.btn('MENU', '', () => this.actions.toMenu()));
+    } else {
+      actions.appendChild(this.btn(
+        isLastRace ? 'CUP RESULTS ⟫' : 'CONTINUE ⟫', 'primary',
+        () => isLastRace ? this.showCupComplete() : this.actions.toTournament()
+      ));
+      if (!isLastRace) {
+        actions.appendChild(this.btn('GARAGE', '', () => this.actions.toGarage()));
+      }
     }
     div.appendChild(actions);
     this.root.appendChild(div);
@@ -681,9 +794,9 @@ export class Screens {
       <div style="flex:0.5"></div>
       <div style="font-size:64px" class="${playerRank === 1 ? 'trophy-pop' : ''}">${playerRank === 1 ? '🏆' : playerRank <= 3 ? '🥈' : '🏁'}</div>
       <h2 style="font-size:36px" class="${playerRank === 1 ? 'gold' : 'cyan'}">
-        ${playerRank === 1 ? `${CUP.name} CHAMPION!` : `CUP COMPLETE — P${playerRank}`}</h2>
+        ${playerRank === 1 ? `${cupAt(this.profile.cup.cupIndex).name} CHAMPION!` : `CUP COMPLETE — P${playerRank}`}</h2>
       <div class="muted" style="margin:8px 0 20px">${
-        playerRank === 1 ? `Winner bonus: <span class="green">${money(CUP.winBonus)}</span>` : 'Better luck next season.'}</div>`;
+        playerRank === 1 ? `Winner bonus: <span class="green">${money(cupAt(this.profile.cup.cupIndex).winBonus)}</span>` : 'Better luck next season.'}</div>`;
     if (playerRank === 1) { this.confetti(div); this.actions.sfx('fanfare'); this.actions.sfx('voice:win'); }
     else this.actions.sfx('voice:lose');
     const panel = document.createElement('div');
@@ -696,11 +809,145 @@ export class Screens {
     div.appendChild(panel);
     const actions = document.createElement('div');
     actions.style.cssText = 'display:flex;gap:12px;margin-top:20px';
-    actions.appendChild(this.btn('START NEW CUP ⟫', 'primary', () => {
-      p.cup = freshCup();
-      saveProfile(p);
-      this.actions.toTournament();
-    }));
+    // offer the next cup up if one is unlocked, else replay this one
+    const nextIdx = Math.min(p.cup.cupIndex + 1, CUPS.length - 1);
+    const nextCup = CUPS[nextIdx];
+    const canAdvance = nextIdx !== p.cup.cupIndex && cupUnlocked(nextCup, p.totalEarned);
+    actions.appendChild(this.btn(
+      canAdvance ? `${nextCup.name} ⟫` : 'RACE THIS CUP AGAIN ⟫', 'primary',
+      () => {
+        p.cup = freshCup(canAdvance ? nextIdx : p.cup.cupIndex);
+        saveProfile(p);
+        this.actions.toTournament();
+      }
+    ));
+    actions.appendChild(this.btn('MENU', '', () => this.actions.toMenu()));
+    div.appendChild(actions);
+    this.root.appendChild(div);
+  }
+
+  // ---------------- single events (Time Trial / Elimination) ----------------
+  showModes(): void {
+    this.clear();
+    const p = this.profile;
+    const div = document.createElement('div');
+    div.className = 'screen-root';
+    this.topbar(div, 'SINGLE EVENTS');
+
+    const intro = document.createElement('div');
+    intro.style.cssText = 'width:100%;max-width:1180px;margin-bottom:12px';
+    intro.innerHTML = `<div class="muted" style="font-size:13px">
+      <b class="cyan">TIME TRIAL</b> — solo hot laps, no weapons or hazards. Beats your ghost and writes the leaderboard.
+      &nbsp;·&nbsp; <b class="pink">ELIMINATION</b> — last place is culled at the end of every lap.</div>`;
+    div.appendChild(intro);
+
+    const grid = document.createElement('div');
+    grid.className = 'race-grid';
+    for (const track of TRACKS) {
+      const card = document.createElement('div');
+      card.className = 'race-card current';
+      const best = p.bestTimes[track.id];
+      card.innerHTML = `
+        <div class="spread"><span class="title-font" style="font-size:15px">${track.name}</span>
+          <span class="muted" style="font-size:12px">${track.difficulty}</span></div>
+        <div class="muted" style="font-size:12px">${track.subtitle} · ${track.laps} laps</div>
+        <canvas class="minimap-box" width="220" height="130" style="width:100%"></canvas>
+        <div style="font-size:12px">${best ? `<span class="gold">BEST ${fmtTime(best)}</span>` : '<span class="muted">no time set</span>'}</div>`;
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:8px;margin-top:8px';
+      row.appendChild(this.btn('⏱ TIME TRIAL', 'small primary', () => this.actions.startModeRace('timetrial', track.id)));
+      row.appendChild(this.btn('❌ ELIM', 'small', () => this.actions.startModeRace('elimination', track.id)));
+      card.appendChild(row);
+      grid.appendChild(card);
+      drawPreview(card.querySelector('canvas') as HTMLCanvasElement, track);
+    }
+    div.appendChild(grid);
+
+    const back = document.createElement('div');
+    back.style.cssText = 'display:flex;gap:12px;margin-top:18px';
+    back.appendChild(this.btn('LEADERBOARDS', 'small', () => this.actions.toLeaderboards()));
+    back.appendChild(this.btn('⟪ BACK', 'small', () => this.actions.toMenu()));
+    div.appendChild(back);
+    this.root.appendChild(div);
+  }
+
+  // ---------------- leaderboards ----------------
+  showLeaderboards(): void {
+    this.clear();
+    const p = this.profile;
+    const div = document.createElement('div');
+    div.className = 'screen-root';
+    this.topbar(div, 'LEADERBOARDS');
+
+    const grid = document.createElement('div');
+    grid.className = 'race-grid';
+    for (const track of TRACKS) {
+      const board = p.leaderboards[track.id] ?? [];
+      const card = document.createElement('div');
+      card.className = 'race-card ' + (board.length ? 'current' : 'locked');
+      const rows = board.length
+        ? board.map((e, i) => {
+            const car = CARS.find((c) => c.id === e.carId);
+            return `<tr><td style="width:26px">${i + 1}</td>
+              <td>${car ? car.name : e.carId}</td>
+              <td style="text-align:right" class="${i === 0 ? 'gold' : ''}">${fmtTime(e.timeMs)}</td></tr>`;
+          }).join('')
+        : '<tr><td colspan="3" class="muted" style="font-size:12px">No laps recorded yet.</td></tr>';
+      card.innerHTML = `
+        <div class="title-font" style="font-size:15px">${track.name}</div>
+        <div class="muted" style="font-size:12px">${track.subtitle}</div>
+        <table class="standings-table" style="margin-top:6px">${rows}</table>`;
+      const go = this.btn('⏱ SET A TIME', 'small', () => this.actions.startModeRace('timetrial', track.id));
+      go.style.marginTop = '8px';
+      card.appendChild(go);
+      grid.appendChild(card);
+    }
+    div.appendChild(grid);
+
+    const back = document.createElement('div');
+    back.style.marginTop = '18px';
+    back.appendChild(this.btn('⟪ BACK', 'small', () => this.actions.toMenu()));
+    div.appendChild(back);
+    this.root.appendChild(div);
+  }
+
+  // ---------------- time trial results ----------------
+  showTimeTrialResults(trackId: string, bestLapMs: number | null, rank: number): void {
+    this.clear();
+    const p = this.profile;
+    const track = TRACKS.find((t) => t.id === trackId);
+    const board = p.leaderboards[trackId] ?? [];
+    const div = document.createElement('div');
+    div.className = 'screen-root overlay';
+    const podium = rank === 1;
+    div.innerHTML = `
+      <div style="flex:0.5"></div>
+      <div style="font-size:56px" class="${podium ? 'trophy-pop' : ''}">${podium ? '🏆' : rank ? '⏱' : '🏁'}</div>
+      <h2 style="font-size:32px" class="${podium ? 'gold' : 'cyan'}">
+        ${podium ? 'NEW TRACK RECORD!' : rank ? `LEADERBOARD P${rank}` : 'TIME TRIAL COMPLETE'}</h2>
+      <div class="muted" style="margin:6px 0 18px">${track ? track.name : trackId} — best lap
+        <span class="gold">${fmtTime(bestLapMs)}</span></div>`;
+    if (podium) { this.confetti(div); this.actions.sfx('fanfare'); }
+
+    const panel = document.createElement('div');
+    panel.className = 'panel';
+    panel.style.width = '460px';
+    panel.innerHTML = `<div class="section-title">TOP LAPS</div>
+      <table class="standings-table">${
+        board.map((e, i) => {
+          const car = CARS.find((c) => c.id === e.carId);
+          const isThis = rank === i + 1;
+          return `<tr class="${isThis ? 'you' : ''}"><td style="width:30px">${i + 1}</td>
+            <td>${car ? car.name : e.carId}</td>
+            <td style="text-align:right">${fmtTime(e.timeMs)}</td></tr>`;
+        }).join('') || '<tr><td class="muted">No laps recorded.</td></tr>'
+      }</table>`;
+    div.appendChild(panel);
+
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:12px;margin-top:20px';
+    actions.appendChild(this.btn('↻ RUN AGAIN', 'primary', () => this.actions.startModeRace('timetrial', trackId)));
+    actions.appendChild(this.btn('EVENTS', '', () => this.actions.toModes()));
     actions.appendChild(this.btn('MENU', '', () => this.actions.toMenu()));
     div.appendChild(actions);
     this.root.appendChild(div);
