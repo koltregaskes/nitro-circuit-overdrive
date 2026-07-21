@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { CarStats } from './data';
 import { BuiltTrack, Obstacle, nearestSample } from './track';
 import { buildAnimalMesh, buildCarMesh, buildLorryMesh, buildMineMesh, buildMissileMesh } from './carmesh';
-import { DEBRIS_MODELS, buildCarFromModel, cloneScaled } from './models';
+import { DEBRIS_MODELS, WheelRig, buildCarFromModel, cloneScaled } from './models';
 
 export interface RacerConfig {
   id: string;
@@ -72,6 +72,11 @@ interface Racer {
   slip: number;      // oil-slick slide timer
   debrisCd: number;  // debris hit cooldown
   crash: number;     // crash-recovery timer (frozen + flashing while > 0)
+  // animation rig (Phase 3 juice)
+  wheels: WheelRig[];
+  wheelSpin: number; // accumulated wheel roll angle
+  prevSpeed: number; // for accel-derived suspension pitch
+  bodyPitch: number; // smoothed nose-up/nose-down
   // AI state
   aiOffset: number;
   aiBoostCd: number;
@@ -124,6 +129,7 @@ interface Effect {
   life: number;
   maxLife: number;
   grow: number;
+  base: number; // base scale — size now lives on the transform, not the geometry
 }
 
 export interface HudState {
@@ -152,6 +158,13 @@ const GRID_COLORS_FALLBACK = 0x888888;
 
 // Inward-facing gradient sky dome (art-of-rally look): horizon = fog colour so the
 // dome, fog and ground edge all blend into one atmosphere.
+//
+// NOTE (measured 2026-07-21): with the current hard top-down ortho camera this dome
+// is NOT visible in gameplay — the radius-900 ground disc fills the whole frame, so
+// no horizon is ever on screen. Toggling `dome.visible` is pixel-identical. It is
+// kept deliberately because it costs ~1 occluded draw call and Phase 5's free-camera
+// photo mode WILL see it. The visible Phase-2 atmosphere comes from FogExp2 + the
+// per-theme grade, not from this. Don't "fix" the look by tweaking the dome.
 function makeSkyDome(top: THREE.Color, horizon: THREE.Color): THREE.Mesh {
   // radius sits the camera (which roams ±~250 around origin) comfortably inside the
   // dome while staying within the ortho far plane (main.ts sets far=2200)
@@ -197,7 +210,18 @@ export class Race {
   autopilot = false;
   /** camera shake trauma 0..1, read by the renderer */
   shakeTrauma = 0;
-  private skids: THREE.Mesh[] = [];
+  // ONE unit sphere shared by every explosion/spark/dust/trail puff. Owned by the
+  // race (not module-level) so dispose() frees it correctly and the next race builds
+  // its own — a shared module constant would be disposed out from under race #2.
+  // Materials stay per-puff because updateEffects fades opacity independently.
+  private fxGeo = new THREE.SphereGeometry(1, 7, 6);
+  // Skid marks: ONE InstancedMesh ring buffer. They used to be 150 individual meshes
+  // = up to 150 draw calls, which was the single biggest draw-call cost in the game
+  // (measured: 129 for the whole tunnel scene vs +150 for a full skid pool).
+  private static readonly SKID_CAP = 160;
+  private skidMesh!: THREE.InstancedMesh;
+  private skidWrite = 0;      // monotonic; wraps into the ring via % SKID_CAP
+  private skidDummy = new THREE.Object3D();
   private skidMat = new THREE.MeshBasicMaterial({ color: 0x14141a, transparent: true, opacity: 0.4, depthWrite: false });
   private racers: Racer[] = [];
   private missiles: Missile[] = [];
@@ -286,6 +310,9 @@ export class Race {
         mesh.scale.setScalar(1.25); // visual readability from the top-down camera
       }
       mesh.position.copy(slot.pos);
+      // YXZ: heading (Y) first, then suspension pitch (X) and drift lean (Z) resolve
+      // in the car's OWN axes rather than world axes
+      mesh.rotation.order = 'YXZ';
       mesh.rotation.y = slot.heading;
       mesh.traverse((o) => {
         const m = o as THREE.Mesh;
@@ -330,6 +357,10 @@ export class Race {
         slip: 0,
         debrisCd: 0,
         crash: 0,
+        wheels: (mesh.userData.wheels as WheelRig[] | undefined) ?? [],
+        wheelSpin: 0,
+        prevSpeed: 0,
+        bodyPitch: 0,
         aiOffset: (Math.random() - 0.5) * track.halfWidth * 0.8,
         aiBoostCd: 2 + Math.random() * 4,
         aiItemCd: 5 + Math.random() * 6,
@@ -339,6 +370,16 @@ export class Race {
       if (cfg.isPlayer) this.player = racer;
     });
     if (!this.player) this.player = this.racers[0];
+
+    // skid ring buffer — one draw call for every tyre mark on the track
+    const skidGeo = new THREE.PlaneGeometry(0.45, 1.1);
+    skidGeo.rotateX(-Math.PI / 2); // lie flat on the road; instances then just yaw
+    this.skidMesh = new THREE.InstancedMesh(skidGeo, this.skidMat, Race.SKID_CAP);
+    this.skidMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.skidMesh.frustumCulled = false; // marks spread down the whole track
+    this.skidMesh.count = 0;
+    this.skidMesh.renderOrder = 1;       // draw over the road surface
+    this.scene.add(this.skidMesh);
 
     // a couple of standing oil slicks on corners from the start
     const n = track.samples.length;
@@ -816,16 +857,46 @@ export class Race {
     r.mesh.rotation.y = r.heading + slip * 0.25;
     r.mesh.rotation.z = THREE.MathUtils.clamp(-slip * 0.3, -0.18, 0.18);
 
+    // ---- suspension: accel squats the tail, braking dives the nose ----
+    const accel = (Math.abs(r.speed) - Math.abs(r.prevSpeed)) / Math.max(dt, 1e-4);
+    r.prevSpeed = r.speed;
+    const targetPitch = THREE.MathUtils.clamp(-accel * 0.0032, -0.075, 0.075);
+    // critically-damped-ish chase so it settles instead of oscillating
+    r.bodyPitch += (targetPitch - r.bodyPitch) * Math.min(1, dt * 9);
+    r.mesh.rotation.x = r.bodyPitch;
+
+    // ---- wheels: roll by ground speed, steer the front pair ----
+    if (r.wheels.length) {
+      r.wheelSpin += (r.speed / r.wheels[0].radius) * dt;
+      const steerAngle = THREE.MathUtils.clamp(ctrl.steer, -1, 1) * 0.42;
+      for (const w of r.wheels) {
+        w.obj.rotation.x = w.baseRotX + r.wheelSpin;
+        if (w.front) w.obj.rotation.y = w.baseRotY + steerAngle;
+        // squash the ride height slightly with pitch so the body visibly loads up
+        w.obj.position.y = w.baseY - r.bodyPitch * (w.front ? -0.35 : 0.35);
+      }
+    }
+
     // juice (player only, for performance): skid marks when drifting, dust off-road/boosting
     if (r.cfg.isPlayer && !r.finished) {
       const speed = Math.abs(r.speed);
       if (!r.offTrack && r.crash <= 0 && (Math.abs(slip) > 0.32 || r.slip > 0) && speed > 14) {
         this.laySkid(r);
       }
-      if (speed > 10 && (r.offTrack || r.boosting) && Math.random() < 0.6) {
+      if (speed > 10 && r.offTrack && Math.random() < 0.6) {
         const back = new THREE.Vector3(Math.sin(r.heading), 0, Math.cos(r.heading)).multiplyScalar(-1.8);
-        const col = r.offTrack ? 0xc8b98a : 0x9fd8ff;
-        this.spawnDust(r.pos.clone().add(back), col, r.boosting ? 0.5 : 0.8);
+        this.spawnDust(r.pos.clone().add(back), 0xc8b98a, 0.8);
+      }
+      // boost trail: hot exhaust plume behind the nitro flame, two puffs per frame
+      // so it reads as a continuous streak at speed rather than dashes
+      if (r.boosting && r.crash <= 0) {
+        const back = new THREE.Vector3(Math.sin(r.heading), 0, Math.cos(r.heading)).multiplyScalar(-2.2);
+        const lat = new THREE.Vector3(Math.cos(r.heading), 0, -Math.sin(r.heading));
+        for (let k = 0; k < 2; k++) {
+          const hot = [0xfff0a0, 0xffb347, 0xff6a2b][Math.floor(Math.random() * 3)];
+          const jit = lat.clone().multiplyScalar((Math.random() - 0.5) * 0.7);
+          this.spawnDust(r.pos.clone().add(back).add(jit), hot, 0.3 + Math.random() * 0.22);
+        }
       }
     }
   }
@@ -1040,12 +1111,13 @@ export class Race {
   private spawnExplosion(pos: THREE.Vector3, color: number): void {
     pos.y = 1;
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 10, 8),
+      this.fxGeo,
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 })
     );
     mesh.position.copy(pos);
+    mesh.scale.setScalar(1);
     this.scene.add(mesh);
-    this.effects.push({ mesh, life: 0.45, maxLife: 0.45, grow: 14 });
+    this.effects.push({ mesh, life: 0.45, maxLife: 0.45, grow: 14, base: 1 });
     // shake the camera when the blast is near the player
     const d = this.player.pos.distanceTo(pos);
     if (d < 30) this.addShake(0.5 * (1 - d / 30));
@@ -1054,42 +1126,43 @@ export class Race {
   private spawnSparks(pos: THREE.Vector3): void {
     pos.y = 0.8;
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.4, 6, 5),
+      this.fxGeo,
       new THREE.MeshBasicMaterial({ color: 0xffd35c, transparent: true, opacity: 0.95 })
     );
     mesh.position.copy(pos);
+    mesh.scale.setScalar(0.4);
     this.scene.add(mesh);
-    this.effects.push({ mesh, life: 0.22, maxLife: 0.22, grow: 6 });
+    this.effects.push({ mesh, life: 0.22, maxLife: 0.22, grow: 6, base: 0.4 });
   }
 
   private spawnDust(pos: THREE.Vector3, color: number, size = 0.7): void {
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(size, 6, 5),
+      this.fxGeo,
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthWrite: false })
     );
     mesh.position.copy(pos);
     mesh.position.y = 0.5;
+    mesh.scale.setScalar(size);
     this.scene.add(mesh);
-    this.effects.push({ mesh, life: 0.4 + Math.random() * 0.2, maxLife: 0.55, grow: 8 });
+    this.effects.push({ mesh, life: 0.4 + Math.random() * 0.2, maxLife: 0.55, grow: 8, base: size });
   }
 
-  // Lay a pair of tyre marks under the rear wheels; recycled into a capped pool.
+  // Lay a pair of tyre marks under the rear wheels into the instanced ring buffer.
   private laySkid(r: Racer): void {
     const back = new THREE.Vector3(Math.sin(r.heading), 0, Math.cos(r.heading)).multiplyScalar(-1.4);
     for (const side of [0.85, -0.85]) {
       const lat = new THREE.Vector3(Math.cos(r.heading), 0, -Math.sin(r.heading)).multiplyScalar(side);
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 1.1), this.skidMat);
-      m.rotation.x = -Math.PI / 2;
-      m.rotation.z = -r.heading;
-      m.position.copy(r.pos).add(back).add(lat);
-      m.position.y = 0.05;
-      this.scene.add(m);
-      this.skids.push(m);
+      const dm = this.skidDummy;
+      dm.position.copy(r.pos).add(back).add(lat);
+      dm.position.y = 0.05;
+      dm.rotation.set(0, r.heading, 0); // geometry is pre-laid flat, so yaw is enough
+      dm.updateMatrix();
+      this.skidMesh.setMatrixAt(this.skidWrite % Race.SKID_CAP, dm.matrix);
+      this.skidWrite++;
     }
-    while (this.skids.length > 150) {
-      const old = this.skids.shift();
-      if (old) { this.scene.remove(old); old.geometry.dispose(); }
-    }
+    // grow up to capacity, then keep overwriting oldest (ring)
+    this.skidMesh.count = Math.min(this.skidWrite, Race.SKID_CAP);
+    this.skidMesh.instanceMatrix.needsUpdate = true;
   }
 
   private addShake(amount: number): void {
@@ -1100,11 +1173,16 @@ export class Race {
     for (const e of this.effects) {
       e.life -= dt;
       const f = 1 - e.life / e.maxLife;
-      e.mesh.scale.setScalar(1 + f * e.grow * 0.3);
+      e.mesh.scale.setScalar(e.base * (1 + f * e.grow * 0.3));
       (e.mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.9 * (1 - f));
     }
     this.effects = this.effects.filter((e) => {
-      if (e.life <= 0) { this.scene.remove(e.mesh); return false; }
+      if (e.life <= 0) {
+        this.scene.remove(e.mesh);
+        // free the per-puff material; the geometry is shared (fxGeo) so leave it
+        (e.mesh.material as THREE.Material).dispose();
+        return false;
+      }
       return true;
     });
   }

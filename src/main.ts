@@ -81,6 +81,10 @@ class Game {
   private lastW = 0;
   private lastH = 0;
   private envMap: THREE.Texture | null = null;
+  /** ?perf — log build timings and per-second draw-call/triangle counts */
+  private readonly perf = new URLSearchParams(location.search).has('perf');
+  private perfAcc = 0;
+  private perfFrames = 0;
 
   constructor() {
     const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -118,6 +122,16 @@ class Game {
         this.screens.setProfile(this.profile);
       },
     });
+
+    // ?perf: the composer resets renderer.info between passes, so take manual control
+    // and reset once per frame — counts then cover the scene AND every post pass.
+    if (this.perf) {
+      this.renderer.info.autoReset = false;
+      console.log('[perf] enabled — build timings + 1s draw-call/triangle rollup');
+    }
+
+    // front-end mini-stages (garage turntable, podium) share the game's PMREM env
+    this.screens.setEnvMap(this.envMap);
 
     window.addEventListener('resize', () => this.onResize());
     window.addEventListener('pointerdown', () => this.audio.unlock(), { once: true });
@@ -316,9 +330,12 @@ class Game {
     await new Promise<void>((r) => setTimeout(r, 32));
     const raceIndex = p.cup.raceIndex;
     const trackDef = TRACKS.find((t) => t.id === CUP.trackIds[raceIndex]) ?? TRACKS[0];
+    const tBuild = performance.now();
     const track = buildTrack(trackDef);
+    const buildMs = performance.now() - tBuild;
     this.raceItemSnapshot = { ...p.items };
 
+    const tRace = performance.now();
     this.race = new Race(
       track,
       this.buildRacerConfigs(raceIndex),
@@ -330,6 +347,10 @@ class Game {
       },
       { weapons: p.settings.weapons }
     );
+    const raceMs = performance.now() - tRace;
+    if (this.perf) {
+      console.log(`[perf] ${trackDef.id}: buildTrack ${buildMs.toFixed(1)}ms · new Race ${raceMs.toFixed(1)}ms · quality ${p.settings.quality}`);
+    }
     if (this.envMap) this.race.scene.environment = this.envMap;
 
     this.state = 'race';
@@ -483,6 +504,7 @@ class Game {
       if (!skipRender) {
         if (this.composer) this.composer.render();
         else this.renderer.render(this.race.scene, this.camera);
+        if (this.perf) this.perfSample(dt);
       }
       this.hud.update(this.race.hudState());
     } else if (this.state === 'results' && this.race) {
@@ -494,6 +516,20 @@ class Game {
     }
 
     this.input.endFrame();
+  }
+
+  /** ?perf — roll up whole-frame draw calls/triangles once a second. */
+  private perfSample(dt: number): void {
+    const r = this.renderer.info.render;
+    this.perfAcc += dt;
+    this.perfFrames++;
+    if (this.perfAcc >= 1) {
+      const fps = (this.perfFrames / this.perfAcc).toFixed(0);
+      console.log(`[perf] ${fps} fps · draw calls ${r.calls} · tris ${r.triangles}`);
+      this.perfAcc = 0;
+      this.perfFrames = 0;
+    }
+    this.renderer.info.reset(); // manual reset (autoReset disabled in the constructor)
   }
 
   /** Debug/test access for headless verification. */

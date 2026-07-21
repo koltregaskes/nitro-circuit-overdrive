@@ -27,8 +27,14 @@ loop must feel *great*; (3) art direction + audio carry the "quality" perception
   flat shading throughout, GTAO contact AO, vignette, per-theme colour grade, film
   grain, SMAA, rim light, per-theme lighting rigs, and a genuinely nocturnal NIGHT.
   Gated by a `low/medium/high` quality setting (6.71 / 3.19 / 1.98 ms per frame).
+- **Juice pass (Phase 3):** wheel spin + steering + accel-driven suspension squat,
+  hot boost trail, countdown/lap scale-pops, live 3D garage turntable, and a top-3
+  podium with a camera arc on the results screen.
 - **Perf pass (Phase 1, `1c8cbfd`):** instanced foliage/rocks, rebuilt mountain pass,
-  track caching — tunnel draw calls ~400–800 → 66; no race-start hitch.
+  track caching — tunnel draw calls ~400–800 → 66; no race-start hitch. Phase 3 also
+  rebuilt skid marks as one InstancedMesh (**150 → 0** draw calls; tunnel HIGH frame
+  time 6.25 → 2.53 ms).
+- Append **`?perf`** to the URL for build timings + a 1s draw-call/triangle rollup.
 - Live + auto-deployed: https://koltregaskes.github.io/nitro-circuit-overdrive/
 
 ## The plan to "10 stars"

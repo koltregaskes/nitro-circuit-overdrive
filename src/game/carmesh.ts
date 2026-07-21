@@ -1,6 +1,7 @@
 // Procedural low-poly car mesh with a readable roof number.
 
 import * as THREE from 'three';
+import { attachWheelRig } from './models';
 
 export function buildCarMesh(color: number, accent: number, carNum: string): THREE.Group {
   const g = new THREE.Group();
@@ -56,14 +57,18 @@ export function buildCarMesh(color: number, accent: number, carNum: string): THR
   strutR.position.x = -0.6;
   g.add(strutR);
 
-  // wheels
+  // wheels — named + rigged so the sim can spin/steer/suspend them like the GLB cars
   const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.3, 8);
   wheelGeo.rotateZ(Math.PI / 2);
+  const wheels: THREE.Object3D[] = [];
   for (const [x, z] of [[0.85, 1.15], [-0.85, 1.15], [0.85, -1.2], [-0.85, -1.2]]) {
     const w = new THREE.Mesh(wheelGeo, darkMat);
     w.position.set(x, 0.36, z);
+    w.name = 'wheel';
     g.add(w);
+    wheels.push(w);
   }
+  attachWheelRig(g, wheels);
 
   // headlights
   const lightMat = new THREE.MeshBasicMaterial({ color: 0xfff2b8 });

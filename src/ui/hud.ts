@@ -15,6 +15,13 @@ function hex(c: number): string {
   return '#' + c.toString(16).padStart(6, '0');
 }
 
+/** Restart a CSS animation on an element (remove class → force reflow → re-add). */
+function replayAnim(el: HTMLElement, cls: string): void {
+  el.classList.remove(cls);
+  void el.offsetWidth; // reflow: without this the browser coalesces and nothing replays
+  el.classList.add(cls);
+}
+
 export class Hud {
   private root: HTMLElement;
   private minimapCanvas!: HTMLCanvasElement;
@@ -22,6 +29,8 @@ export class Hud {
   private els: Record<string, HTMLElement> = {};
   private lastBoardKey = '';
   private bestTrackMs: number | null = null;
+  private lastCountdown: number | null = null;
+  private lastMessage: string | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -100,19 +109,24 @@ export class Hud {
     this.setBar(e['h-boostbar'], s.boostFrac, 4, true);
     this.setBar(e['h-armourbar'], s.armourFrac, 5, false);
 
-    // countdown / messages
+    // countdown / messages — re-pop only when the text actually changes
     if (s.countdown !== null) {
       e['h-countdown'].style.display = '';
       e['h-countdown'].textContent = String(s.countdown);
+      if (s.countdown !== this.lastCountdown) replayAnim(e['h-countdown'], 'hud-pop');
     } else {
       e['h-countdown'].style.display = 'none';
     }
+    this.lastCountdown = s.countdown;
+
     if (s.message) {
       e['h-message'].style.display = '';
       e['h-message'].textContent = s.message;
+      if (s.message !== this.lastMessage) replayAnim(e['h-message'], 'hud-msg-pop');
     } else {
       e['h-message'].style.display = 'none';
     }
+    this.lastMessage = s.message;
     e['h-wrongway'].style.display = s.wrongWay ? '' : 'none';
 
     // standings board (rebuild only when order changes)

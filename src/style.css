@@ -196,6 +196,20 @@ h1, h2, h3, .title-font {
 .hud-wrong-way { font-size: 34px; font-weight: 900; font-style: italic; color: var(--pink); animation: blink 0.6s infinite; }
 @keyframes blink { 50% { opacity: 0.2; } }
 
+/* countdown ticks slam in from large; messages punch out from small */
+.hud-pop { animation: hud-pop 0.45s cubic-bezier(0.18, 1.5, 0.4, 1) both; }
+@keyframes hud-pop {
+  0%   { transform: scale(2.3); opacity: 0; }
+  35%  { transform: scale(0.92); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.hud-msg-pop { animation: hud-msg-pop 0.5s cubic-bezier(0.18, 1.5, 0.4, 1) both; }
+@keyframes hud-msg-pop {
+  0%   { transform: scale(0.35); opacity: 0; }
+  40%  { transform: scale(1.14); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
 /* ---------- tutorial card ---------- */
 .tutorial-card {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);

@@ -2,11 +2,14 @@
 
 import * as THREE from 'three';
 import {
-  CARS, CUP, ITEM_PRICES, PLAYER_NAME, REPAIR_PRICE_PER_PCT, RIVALS, TRACKS,
+  CARS, CUP, ITEM_PRICES, PLAYER_CAR_NUM, PLAYER_NAME, REPAIR_PRICE_PER_PCT, RIVALS, TRACKS,
   TrackDef, UPGRADES, effectiveStats, upgradeCost,
 } from '../game/data';
 import { Profile, carUpgrades, freshCup, resetProfile, saveProfile } from '../game/save';
 import { RaceResult } from '../game/race';
+import { PLAYER_CAR_MODELS, RIVAL_MODELS, buildCarFromModel } from '../game/models';
+import { buildCarMesh } from '../game/carmesh';
+import { MiniStage } from './ministage';
 
 export interface ScreenActions {
   startNextRace(): void;
@@ -100,6 +103,8 @@ export class Screens {
   private root: HTMLElement;
   private actions: ScreenActions;
   private profile: Profile;
+  private stage: MiniStage | null = null;
+  private envMap: THREE.Texture | null = null;
 
   constructor(root: HTMLElement, profile: Profile, actions: ScreenActions) {
     this.root = root;
@@ -109,7 +114,39 @@ export class Screens {
 
   setProfile(p: Profile): void { this.profile = p; }
 
-  clear(): void { this.root.innerHTML = ''; }
+  /** Share the game's PMREM environment so garage/podium cars get the same paint. */
+  setEnvMap(tex: THREE.Texture | null): void { this.envMap = tex; }
+
+  clear(): void {
+    // dispose first: every screen calls clear(), so this is the single choke point
+    // that guarantees at most ONE extra WebGL context is ever alive
+    this.stage?.dispose();
+    this.stage = null;
+    this.root.innerHTML = '';
+  }
+
+  /** Build a car mesh for the front-end (GLB when available, procedural fallback). */
+  private frontEndCar(model: string | null, color: number, accent: number, num: string): THREE.Group {
+    const built = model ? buildCarFromModel(model, color, num) : null;
+    if (built) return built;
+    const proc = buildCarMesh(color, accent, num);
+    proc.scale.setScalar(1.25);
+    return proc;
+  }
+
+  /** Create the single MiniStage, plus a soft disc so cars don't float in space. */
+  private makeStage(w: number, h: number): MiniStage {
+    const stage = new MiniStage(w, h, this.envMap);
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(3.4, 40),
+      new THREE.MeshStandardMaterial({ color: 0x1d2130, roughness: 0.6, metalness: 0.2 })
+    );
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.y = -0.02;
+    stage.scene.add(disc);
+    this.stage = stage;
+    return stage;
+  }
 
   // Apply an AI-generated background image under a dark gradient for legibility.
   private applyBg(el: HTMLElement, file: string, topAlpha = 0.72, botAlpha = 0.9): void {
@@ -294,18 +331,29 @@ export class Screens {
       </div>`;
     grid.appendChild(left);
 
-    // centre: car visual
+    // centre: live 3D turntable of the equipped car
     const centre = document.createElement('div');
     centre.className = 'panel';
     centre.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px';
-    centre.innerHTML = `
-      <div style="width:80%;height:140px;border-radius:10px;background:
-        linear-gradient(160deg, ${hex(car.color)} 0%, #11151f 130%);
-        display:flex;align-items:center;justify-content:center;
-        box-shadow:0 0 40px ${hex(car.color)}44">
-        <span style="font-size:64px;font-weight:900;font-style:italic;color:#fff;text-shadow:2px 2px 0 #0008">47</span>
-      </div>
-      <div class="cyan" style="font-weight:700">✔ EQUIPPED</div>`;
+    const glow = document.createElement('div');
+    glow.style.cssText = `width:100%;border-radius:10px;background:
+      radial-gradient(ellipse at 50% 65%, ${hex(car.color)}33 0%, #11151f00 70%);
+      display:flex;align-items:center;justify-content:center`;
+    const stage = this.makeStage(340, 190);
+    const pivot = new THREE.Group();
+    pivot.add(this.frontEndCar(PLAYER_CAR_MODELS[car.id] ?? null, car.color, car.accent, PLAYER_CAR_NUM));
+    stage.scene.add(pivot);
+    stage.start((_dt, t) => {
+      pivot.rotation.y = t * 0.55;                 // slow showroom spin
+      pivot.position.y = Math.sin(t * 1.1) * 0.04; // barely-there float
+    });
+    glow.appendChild(stage.canvas);
+    centre.appendChild(glow);
+    const eq = document.createElement('div');
+    eq.className = 'cyan';
+    eq.style.fontWeight = '700';
+    eq.textContent = '✔ EQUIPPED';
+    centre.appendChild(eq);
     grid.appendChild(centre);
 
     // right: upgrades
@@ -527,6 +575,40 @@ export class Screens {
       </h2>
       <div class="muted" style="margin:6px 0 18px">+${pointsEarned} cup points · <span class="green">${money(cashEarned)}</span> prize money</div>`;
     if (won) { this.confetti(div); this.actions.sfx('fanfare'); this.actions.sfx('voice:win'); }
+
+    // podium: top-3 cars on blocks, slow camera arc behind the HTML overlay
+    const top3 = results.slice(0, 3);
+    if (top3.length) {
+      const stage = this.makeStage(420, 190);
+      const blockMat = new THREE.MeshStandardMaterial({ color: 0x424a5e, roughness: 0.7, flatShading: true });
+      const H = [0.9, 0.62, 0.44];   // 1st / 2nd / 3rd block heights
+      const X = [0, -2.0, 2.0];      // winner centre, runner-up left, third right
+      for (const r of top3) {
+        const i = Math.min(Math.max(r.position - 1, 0), 2);
+        const h = H[i], x = X[i];
+        const block = new THREE.Mesh(new THREE.BoxGeometry(1.5, h, 1.5), blockMat);
+        block.position.set(x, h / 2, 0);
+        stage.scene.add(block);
+        const model = r.isPlayer
+          ? (PLAYER_CAR_MODELS[this.profile.equipped] ?? null)
+          : (RIVAL_MODELS[r.id] ?? null);
+        const car = this.frontEndCar(model, r.color, 0xffffff, r.carNum);
+        car.scale.multiplyScalar(0.42);
+        car.position.set(x, h, 0);
+        car.rotation.y = Math.PI; // nose toward the camera
+        stage.scene.add(car);
+      }
+      stage.start((_dt, t) => {
+        const a = Math.sin(t * 0.32) * 0.55;               // gentle arc, never full orbit
+        stage.camera.position.set(Math.sin(a) * 7.6, 2.9 + Math.sin(t * 0.5) * 0.2, Math.cos(a) * 7.6);
+        stage.camera.lookAt(0, 0.85, 0);
+      });
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display:flex;justify-content:center;margin-bottom:12px';
+      wrap.appendChild(stage.canvas);
+      div.appendChild(wrap);
+    }
+
     const panel = document.createElement('div');
     panel.className = 'panel';
     panel.style.width = '640px';

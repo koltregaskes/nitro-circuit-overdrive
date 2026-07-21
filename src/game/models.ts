@@ -113,6 +113,42 @@ export function cloneScaled(name: string, targetSize: number, alignLongAxisToZ =
   return wrapper;
 }
 
+/** One rigged wheel: base transform captured so spin/steer/suspension can layer on top. */
+export interface WheelRig {
+  obj: THREE.Object3D;
+  front: boolean;
+  baseY: number;
+  baseRotX: number;
+  baseRotY: number;
+  radius: number;
+}
+
+/**
+ * Classify wheel objects front/rear (car faces +Z) and stash them on
+ * `car.userData.wheels` for the sim to animate. Rotation order is set to 'YXZ' so
+ * steering (Y) applies before roll (X) — i.e. the wheel spins about its own steered
+ * axle, not the car's.
+ */
+export function attachWheelRig(car: THREE.Group, wheels: THREE.Object3D[]): void {
+  if (!wheels.length) return;
+  car.updateMatrixWorld(true);
+  const zs = wheels.map((w) => w.getWorldPosition(new THREE.Vector3()).z);
+  const mid = (Math.min(...zs) + Math.max(...zs)) / 2;
+  const rig: WheelRig[] = wheels.map((w, i) => {
+    const size = new THREE.Box3().setFromObject(w).getSize(new THREE.Vector3());
+    w.rotation.order = 'YXZ';
+    return {
+      obj: w,
+      front: zs[i] > mid,
+      baseY: w.position.y,
+      baseRotX: w.rotation.x,
+      baseRotY: w.rotation.y,
+      radius: Math.max(size.y / 2, 0.15), // guard against degenerate boxes
+    };
+  });
+  car.userData.wheels = rig;
+}
+
 export interface InstancePart {
   geometry: THREE.BufferGeometry;
   material: THREE.Material;
@@ -191,6 +227,7 @@ export function buildCarFromModel(name: string, color: number, carNum: string): 
 
   // tint the body mesh (separate from wheels in Kenney car kit)
   const tint = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.25);
+  const wheels: THREE.Object3D[] = [];
   car.traverse((o) => {
     const m = o as THREE.Mesh;
     if (m.isMesh && /body/i.test(m.name)) {
@@ -200,7 +237,9 @@ export function buildCarFromModel(name: string, color: number, carNum: string): 
       mat.roughness = 0.35;
       m.material = mat;
     }
+    if (/wheel/i.test(o.name)) wheels.push(o);
   });
+  attachWheelRig(car, wheels);
 
   const box = new THREE.Box3().setFromObject(car);
 
