@@ -23,6 +23,12 @@ loop must feel *great*; (3) art direction + audio carry the "quality" perception
   object collisions w/ crash+respawn, gamepad, responsive UI, saves.
 - Kenney CC0 low-poly models, real-time shadows + bloom, procedural textures,
   screen shake, skid marks, dust. Procedural WebAudio SFX (no music yet).
+- **Art-of-rally graphics pass (Phase 2, `7095768`):** gradient sky dome, `FogExp2`,
+  flat shading throughout, GTAO contact AO, vignette, per-theme colour grade, film
+  grain, SMAA, rim light, per-theme lighting rigs, and a genuinely nocturnal NIGHT.
+  Gated by a `low/medium/high` quality setting (6.71 / 3.19 / 1.98 ms per frame).
+- **Perf pass (Phase 1, `1c8cbfd`):** instanced foliage/rocks, rebuilt mountain pass,
+  track caching — tunnel draw calls ~400–800 → 66; no race-start hitch.
 - Live + auto-deployed: https://koltregaskes.github.io/nitro-circuit-overdrive/
 
 ## The plan to "10 stars"
@@ -56,9 +62,14 @@ loop must feel *great*; (3) art direction + audio carry the "quality" perception
 - [ ] Playtest cycle + balance pass; achievements.
 
 ## Known issues / tech debt
-- Single JS chunk > 500 kB (three.js not code-split) — fine for slice, fix pre-launch.
+- Single JS chunk **775 kB** (three.js not code-split) — fine for slice, fix pre-launch.
 - AI doesn't avoid mines/oil/obstacles; rivals are stat-scaled, not per-car builds.
-- Audio unverified on the player's machine (confirm before investing in mix).
+- **OPEN QUESTION — audio unverified on Kol's machine.** Confirm sound actually plays
+  before investing in the Phase-5 mix. Blocks the biggest remaining quality lever.
+- **OPEN QUESTION — default quality tier.** `Settings.quality` defaults to `high`
+  (6.71 ms/frame on the dev box, ~10 ms of 60 fps headroom). A weak integrated GPU
+  could be 3–4× slower and miss 60 fps on first run. Options: keep `high`, default to
+  `medium`, or auto-detect on first boot. Needs a call before wider play.
 - No online anything (by design for the slice; out of scope unless desired).
 
 ## Done in code review (this pass)
