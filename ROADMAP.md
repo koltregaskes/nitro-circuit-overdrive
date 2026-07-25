@@ -37,6 +37,15 @@ loop must feel *great*; (3) art direction + audio carry the "quality" perception
 - Append **`?perf`** to the URL for build timings + a 1s draw-call/triangle rollup.
 - Live + auto-deployed: https://koltregaskes.github.io/nitro-circuit-overdrive/
 
+## Status: feature-complete (Phases 1–5 shipped)
+
+All five phases of the scale-10 plan are implemented, verified and deployed:
+perf (P1), art-of-rally graphics (P2), animation juice (P3), content volume (P4:
+12 cars, 12 tracks, 3 progression cups, Time Trial + ghosts + leaderboards,
+Elimination, liveries, difficulty), and audio/UX polish (P5: engine/SFX/music buses,
+tyre screech, photo mode, soft-lock audit). Headless validation: 0 soft-locks across
+all 12 tracks. What remains below is **optional / decision-gated**, not core build.
+
 ## The plan to "10 stars"
 
 ### 1. Art & audio (needs Magnific + ElevenLabs MCPs — biggest quality lever)

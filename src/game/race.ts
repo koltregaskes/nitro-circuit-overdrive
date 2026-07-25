@@ -130,7 +130,7 @@ interface Effect {
   life: number;
   maxLife: number;
   grow: number;
-  base: number; // base scale â€” size now lives on the transform, not the geometry
+  base: number; // base scale — size now lives on the transform, not the geometry
 }
 
 export interface HudState {
@@ -159,7 +159,7 @@ export type RaceMode = 'race' | 'timetrial' | 'elimination';
 export interface RaceOptions {
   weapons?: boolean;
   mode?: RaceMode;
-  /** AI cornering grip â€” difficulty scales this (see DIFFICULTY_TUNING). */
+  /** AI cornering grip — difficulty scales this (see DIFFICULTY_TUNING). */
   latGrip?: number;
   /** Ghost lap to replay alongside the player (Time Trial only). */
   ghost?: { stride: number; frames: number[] } | null;
@@ -167,7 +167,7 @@ export interface RaceOptions {
   laps?: number;
 }
 
-/** Sampling stride for ghost recording â€” every Nth frame keeps the save small. */
+/** Sampling stride for ghost recording — every Nth frame keeps the save small. */
 export const GHOST_STRIDE = 3;
 
 const GRID_COLORS_FALLBACK = 0x888888;
@@ -176,7 +176,7 @@ const GRID_COLORS_FALLBACK = 0x888888;
 // dome, fog and ground edge all blend into one atmosphere.
 //
 // NOTE (measured 2026-07-21): with the current hard top-down ortho camera this dome
-// is NOT visible in gameplay â€” the radius-900 ground disc fills the whole frame, so
+// is NOT visible in gameplay — the radius-900 ground disc fills the whole frame, so
 // no horizon is ever on screen. Toggling `dome.visible` is pixel-identical. It is
 // kept deliberately because it costs ~1 occluded draw call and Phase 5's free-camera
 // photo mode WILL see it. The visible Phase-2 atmosphere comes from FogExp2 + the
@@ -228,7 +228,7 @@ export class Race {
   shakeTrauma = 0;
   // ONE unit sphere shared by every explosion/spark/dust/trail puff. Owned by the
   // race (not module-level) so dispose() frees it correctly and the next race builds
-  // its own â€” a shared module constant would be disposed out from under race #2.
+  // its own — a shared module constant would be disposed out from under race #2.
   // Materials stay per-puff because updateEffects fades opacity independently.
   private fxGeo = new THREE.SphereGeometry(1, 7, 6);
   // Skid marks: ONE InstancedMesh ring buffer. They used to be 150 individual meshes
@@ -406,7 +406,7 @@ export class Race {
     });
     if (!this.player) this.player = this.racers[0];
 
-    // skid ring buffer â€” one draw call for every tyre mark on the track
+    // skid ring buffer — one draw call for every tyre mark on the track
     const skidGeo = new THREE.PlaneGeometry(0.45, 1.1);
     skidGeo.rotateX(-Math.PI / 2); // lie flat on the road; instances then just yaw
     this.skidMesh = new THREE.InstancedMesh(skidGeo, this.skidMat, Race.SKID_CAP);
@@ -439,7 +439,7 @@ export class Race {
       this.scene.add(gm);
     }
 
-    // Time Trial is a clean hot-lap sandbox â€” no standing hazards
+    // Time Trial is a clean hot-lap sandbox — no standing hazards
     const n = track.samples.length;
     if (this.mode !== 'timetrial') {
       for (let k = 0; k < 2; k++) {
@@ -506,7 +506,7 @@ export class Race {
   }
 
   // Spawn a tanker that drives in from the verge, skids onto the track, tips over
-  // and spills oil + debris â€” all animated. (updateLorry drives the phases.)
+  // and spills oil + debris — all animated. (updateLorry drives the phases.)
   private eventLorry(): void {
     this.lorryDone = true;
     const n = this.track.samples.length;
@@ -610,12 +610,26 @@ export class Race {
   }
   get playerBoosting(): boolean { return this.player.boosting; }
 
+  /** 0-1 tyre-slide amount for the player, used to drive the screech bus. */
+  get playerSlip(): number {
+    const r = this.player;
+    if (r.crash > 0 || r.vel.lengthSq() < 1) return 0;
+    const velHeading = Math.atan2(r.vel.x, r.vel.z);
+    let s = velHeading - r.heading;
+    while (s > Math.PI) s -= Math.PI * 2;
+    while (s < -Math.PI) s += Math.PI * 2;
+    // needs both a real slide angle and real speed before it squeals
+    const speedFactor = Math.min(1, Math.abs(r.speed) / 18);
+    const slide = Math.max(Math.abs(s) / 0.55, r.slip > 0 ? 0.8 : 0);
+    return Math.min(1, slide) * speedFactor;
+  }
+
   // ---------- derived stats ----------
   private maxSpeedOf(r: Racer): number {
     let v = 26 + r.cfg.stats.speed * 2.4;
     if (r.cfg.isPlayer) v *= 0.88 + 0.12 * (r.cfg.condition / 100);
     if (r.boosting) v *= 1.32 + r.cfg.stats.boost * 0.022;
-    if (r.offTrack) v *= 0.78; // gentle arcade penalty â€” grass shaves speed, doesn't kill it
+    if (r.offTrack) v *= 0.78; // gentle arcade penalty — grass shaves speed, doesn't kill it
     if (!r.cfg.isPlayer) v *= r.cfg.skill * r.rubber;
     return v;
   }
@@ -697,7 +711,7 @@ export class Race {
       const t = this.lapFrame / this.ghostStride;
       const i0 = Math.floor(t);
       if (i0 >= triples - 1) {
-        this.ghostMesh.visible = false; // ghost already finished â€” it was quicker
+        this.ghostMesh.visible = false; // ghost already finished — it was quicker
       } else {
         const f = t - i0, a = i0 * 3, b = (i0 + 1) * 3;
         const g = this.ghostFrames;
@@ -765,7 +779,7 @@ export class Race {
     // Obstacle avoidance: bias the target line laterally around anything solid sitting
     // near the road ahead (roadside props, bridge pillars, and above all the tanker
     // wreck, which lands ACROSS the racing line). Without this the AI drives straight
-    // into it and â€” before the clear-respawn fix â€” could crash-loop forever.
+    // into it and — before the clear-respawn fix — could crash-loop forever.
     for (let k = 4; k < 28; k += 4) {
       const s2 = track.samples[(r.sampleIdx + k) % n];
       for (const o of this.obstacles) {
@@ -880,7 +894,7 @@ export class Race {
         // Respawn CLEAR of solid obstacles. Dropping the car back on the track centre
         // is not safe: the tanker wreck (radius 3.4) sits across the racing line, so a
         // centre respawn lands inside it and the car crashes again the moment it moves
-        // â€” an infinite crash loop that permanently stalls the racer.
+        // — an infinite crash loop that permanently stalls the racer.
         const spawn = this.clearRespawn(r.sampleIdx);
         r.pos.copy(spawn.pos);
         r.heading = spawn.heading;
@@ -938,7 +952,7 @@ export class Race {
         if (dx * dx + dz * dz < rr * rr) { this.crashRacer(r); break; }
       }
     }
-    if (r.crash > 0) return; // crashed this frame â€” freeze handled next frame
+    if (r.crash > 0) return; // crashed this frame — freeze handled next frame
 
     // stun (spin-out)
     if (r.stun > 0) {
@@ -1107,7 +1121,7 @@ export class Race {
   /**
    * Elimination: when the leader starts a new lap, the racer in last place is out.
    * Never culls the player on the lap they'd otherwise win, and never empties the
-   * grid â€” we always leave at least two cars running.
+   * grid — we always leave at least two cars running.
    */
   private cullLastPlace(lap: number): void {
     if (lap <= this.lastEliminationLap) return;

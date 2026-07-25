@@ -80,6 +80,9 @@ class Game {
   private raceItemSnapshot = { missile: 0, mine: 0 };
   private raceMode: RaceMode = 'race';
   private raceTrackId = '';
+  private photo = false;
+  private photoOffset = new THREE.Vector2();
+  private photoZoom = 1;
   private camPos = new THREE.Vector3();
   private lastTime = performance.now();
   private composer: EffectComposer | null = null;
@@ -263,8 +266,41 @@ class Game {
   }
 
   private applySettings(): void {
-    this.audio.setVolume(this.profile.settings.volume);
+    const s = this.profile.settings;
+    this.audio.setVolume(s.volume);
+    this.audio.setMix(1, s.volumeSfx, s.volumeMusic);
     this.updateCameraFrustum();
+  }
+
+  // ---------- photo mode ----------
+  /** Freeze the sim and hand the camera to the player. */
+  private togglePhotoMode(): void {
+    if (this.state !== 'race' || !this.race) return;
+    this.photo = !this.photo;
+    if (this.photo) {
+      this.photoOffset.set(0, 0);
+      this.photoZoom = 1;
+      this.hud.unmount();
+      this.screens.showPhotoMode(() => this.togglePhotoMode(), () => this.capturePhoto());
+    } else {
+      this.screens.clear();
+      this.hud.mount(this.race.track.minimap, this.profile.bestTimes[this.raceTrackId] ?? null);
+    }
+  }
+
+  /** Save the current frame as a PNG download. */
+  private capturePhoto(): void {
+    if (this.composer) this.composer.render();
+    else if (this.race) this.renderer.render(this.race.scene, this.camera);
+    this.renderer.domElement.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `nitro-${this.raceTrackId || 'shot'}-${Date.now()}.png`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }, 'image/png');
   }
 
   /** Route a sound name: 'voice:x' plays an mp3 sample, else a procedural sfx. */
@@ -283,6 +319,9 @@ class Game {
     }
     this.state = s;
     this.paused = false;
+    // soft-lock guard: photo mode freezes the sim, so it must never survive a state
+    // change — otherwise the next race boots with input frozen and no HUD
+    this.photo = false;
     this.tutorialActive = false;
     // menu music plays on all front-end screens, off during the race
     this.audio.startMusic();
@@ -393,6 +432,7 @@ class Game {
 
     this.state = 'race';
     this.paused = false;
+    this.photo = false;
     this.screens.clear();
     this.hud.mount(track.minimap, p.bestTimes[trackDef.id] ?? null);
     this.audio.unlock();
@@ -552,6 +592,20 @@ class Game {
 
     if (this.state === 'race' && this.race) {
       const pad = this.readPad();
+      // P toggles photo mode (sim frozen, free camera). Escape leaves it.
+      if (this.input.consume('KeyP') && !this.tutorialActive && !this.paused) {
+        this.togglePhotoMode();
+      }
+      if (this.photo) {
+        this.updatePhotoCamera(dt);
+        if (this.input.consume('Escape')) this.togglePhotoMode();
+        if (!skipRender) {
+          if (this.composer) this.composer.render();
+          else this.renderer.render(this.race.scene, this.camera);
+        }
+        this.input.endFrame();
+        return; // sim frozen: no physics, no HUD
+      }
       if ((this.input.consume('Escape') || (pad?.pauseEdge ?? false)) && !this.tutorialActive) {
         this.setPaused(!this.paused);
       }
@@ -568,6 +622,7 @@ class Game {
         };
         this.race.update(dt, pi, this.profile.settings.assist);
         this.audio.updateEngine(this.race.playerSpeedFrac, this.race.playerBoosting);
+        this.audio.setScreech(this.race.playerSlip);
       }
 
       // camera follow (fixed world orientation, slight tilt for 2.5D readability)
@@ -597,6 +652,35 @@ class Game {
     }
 
     this.input.endFrame();
+  }
+
+  /** Photo mode: WASD/arrows pan, Q/E zoom, R recentres on the player. */
+  private updatePhotoCamera(dt: number): void {
+    if (!this.race) return;
+    const pan = 42 * dt * this.photoZoom;
+    if (this.input.isDown('KeyA', 'ArrowLeft')) this.photoOffset.x -= pan;
+    if (this.input.isDown('KeyD', 'ArrowRight')) this.photoOffset.x += pan;
+    if (this.input.isDown('KeyW', 'ArrowUp')) this.photoOffset.y -= pan;
+    if (this.input.isDown('KeyS', 'ArrowDown')) this.photoOffset.y += pan;
+    if (this.input.isDown('KeyQ')) this.photoZoom = Math.min(2.6, this.photoZoom + dt * 1.1);
+    if (this.input.isDown('KeyE')) this.photoZoom = Math.max(0.35, this.photoZoom - dt * 1.1);
+    if (this.input.consume('KeyR')) { this.photoOffset.set(0, 0); this.photoZoom = 1; }
+
+    const t = this.race.playerPos;
+    const cx = t.x + this.photoOffset.x;
+    const cz = t.z + this.photoOffset.y;
+    this.camera.position.set(cx, 110, cz - 52);
+    this.camera.lookAt(cx, 0, cz);
+    // widen/narrow the ortho box instead of dollying — keeps the 2.5D framing
+    const w = window.innerWidth, h = window.innerHeight;
+    const aspect = w / h;
+    const base = (78 / this.profile.settings.zoom) * this.photoZoom;
+    const viewH = Math.max(base, ((86 / this.profile.settings.zoom) * this.photoZoom) / aspect);
+    this.camera.left = -viewH * aspect / 2;
+    this.camera.right = viewH * aspect / 2;
+    this.camera.top = viewH / 2;
+    this.camera.bottom = -viewH / 2;
+    this.camera.updateProjectionMatrix();
   }
 
   /** ?perf — roll up whole-frame draw calls/triangles once a second. */

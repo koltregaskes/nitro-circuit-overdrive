@@ -575,7 +575,25 @@ export class Screens {
       p.settings.volume = parseFloat(vol.value);
       saveProfile(p); this.actions.applySettings();
     });
-    mkRow('SOUND VOLUME', vol);
+    mkRow('MASTER VOLUME', vol);
+
+    const sfxVol = document.createElement('input');
+    sfxVol.type = 'range'; sfxVol.min = '0'; sfxVol.max = '1'; sfxVol.step = '0.05';
+    sfxVol.value = String(p.settings.volumeSfx);
+    sfxVol.addEventListener('input', () => {
+      p.settings.volumeSfx = parseFloat(sfxVol.value);
+      saveProfile(p); this.actions.applySettings();
+    });
+    mkRow('SFX VOLUME', sfxVol);
+
+    const musVol = document.createElement('input');
+    musVol.type = 'range'; musVol.min = '0'; musVol.max = '1'; musVol.step = '0.05';
+    musVol.value = String(p.settings.volumeMusic);
+    musVol.addEventListener('input', () => {
+      p.settings.volumeMusic = parseFloat(musVol.value);
+      saveProfile(p); this.actions.applySettings();
+    });
+    mkRow('MUSIC VOLUME', musVol);
 
     const zoom = document.createElement('input');
     zoom.type = 'range'; zoom.min = '0.7'; zoom.max = '1.4'; zoom.step = '0.05';
@@ -950,6 +968,28 @@ export class Screens {
     actions.appendChild(this.btn('EVENTS', '', () => this.actions.toModes()));
     actions.appendChild(this.btn('MENU', '', () => this.actions.toMenu()));
     div.appendChild(actions);
+    this.root.appendChild(div);
+  }
+
+  // ---------------- photo mode ----------------
+  showPhotoMode(onExit: () => void, onCapture: () => void): void {
+    this.clear();
+    const div = document.createElement('div');
+    // no .overlay: the scene must stay fully visible behind the controls
+    div.className = 'screen-root';
+    div.style.cssText = 'justify-content:flex-end;pointer-events:none;background:none';
+    const bar = document.createElement('div');
+    bar.className = 'panel';
+    bar.style.cssText = 'pointer-events:auto;margin-bottom:26px;display:flex;align-items:center;gap:16px';
+    bar.innerHTML = `<span class="cyan" style="font-weight:800;font-style:italic">📷 PHOTO MODE</span>
+      <span class="muted" style="font-size:12px">
+        <span class="key">W A S D</span> pan ·
+        <span class="key">Q</span>/<span class="key">E</span> zoom ·
+        <span class="key">R</span> recentre ·
+        <span class="key">ESC</span> exit</span>`;
+    bar.appendChild(this.btn('⬇ SAVE PNG', 'small primary', onCapture));
+    bar.appendChild(this.btn('EXIT', 'small', onExit));
+    div.appendChild(bar);
     this.root.appendChild(div);
   }
 

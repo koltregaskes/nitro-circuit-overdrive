@@ -28,6 +28,8 @@ export interface Settings {
   quality: Quality;     // post-FX tier: low=bloom only, medium=+grade/vignette/grain, high=+GTAO/SMAA
   difficulty: Difficulty;
   showGhost: boolean;   // draw the best-lap ghost in Time Trial
+  volumeSfx: number;    // 0-1 bus trim
+  volumeMusic: number;  // 0-1 bus trim
 }
 
 /** A recorded Time Trial lap: player pose sampled every GHOST_STRIDE frames. */
@@ -87,6 +89,7 @@ export function freshProfile(): Profile {
     settings: {
       volume: 0.6, zoom: 1.0, assist: true, weapons: true,
       quality: 'high', difficulty: 'normal', showGhost: true,
+      volumeSfx: 1, volumeMusic: 0.7,
     },
     tutorialSeen: false,
     bestTimes: {},

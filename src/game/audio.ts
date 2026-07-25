@@ -3,10 +3,17 @@
 export class GameAudio {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  // separate buses so engine / SFX / music can be balanced independently
+  private busEngine: GainNode | null = null;
+  private busSfx: GainNode | null = null;
+  private busMusic: GainNode | null = null;
   private engineOsc: OscillatorNode | null = null;
   private engineSub: OscillatorNode | null = null;
   private engineGain: GainNode | null = null;
+  private screechGain: GainNode | null = null;
+  private screechSrc: AudioBufferSourceNode | null = null;
   volume = 0.6;
+  mix = { engine: 1, sfx: 1, music: 1 };
 
   private ensure(): AudioContext | null {
     if (!this.ctx) {
@@ -15,6 +22,13 @@ export class GameAudio {
         this.master = this.ctx.createGain();
         this.master.gain.value = this.volume;
         this.master.connect(this.ctx.destination);
+        this.busEngine = this.ctx.createGain();
+        this.busSfx = this.ctx.createGain();
+        this.busMusic = this.ctx.createGain();
+        this.busEngine.gain.value = this.mix.engine;
+        this.busSfx.gain.value = this.mix.sfx;
+        this.busMusic.gain.value = this.mix.music;
+        for (const b of [this.busEngine, this.busSfx, this.busMusic]) b.connect(this.master);
       } catch {
         this.ctx = null;
       }
@@ -27,8 +41,49 @@ export class GameAudio {
   setVolume(v: number): void {
     this.volume = v;
     if (this.master) this.master.gain.value = v;
-    for (const a of this.samples.values()) a.volume = Math.min(1, v * 1.2);
-    if (this.musicGain && this.ctx) this.musicGain.gain.setTargetAtTime(v * 0.18, this.ctx.currentTime, 0.1);
+    for (const a of this.samples.values()) a.volume = Math.min(1, v * this.mix.sfx * 1.2);
+    if (this.musicGain && this.ctx) this.musicGain.gain.setTargetAtTime(0.18, this.ctx.currentTime, 0.1);
+  }
+
+  /** Per-bus balance, 0-1 each, applied on top of the master volume. */
+  setMix(engine: number, sfx: number, music: number): void {
+    this.mix = { engine, sfx, music };
+    for (const a of this.samples.values()) a.volume = Math.min(1, this.volume * sfx * 1.2);
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.busEngine?.gain.setTargetAtTime(engine, t, 0.05);
+    this.busSfx?.gain.setTargetAtTime(sfx, t, 0.05);
+    this.busMusic?.gain.setTargetAtTime(music, t, 0.05);
+  }
+
+  /** Tyre screech: a persistent filtered-noise loop whose gain tracks slip. */
+  private startScreech(ctx: AudioContext): void {
+    if (this.screechSrc || !this.busSfx) return;
+    const len = Math.floor(ctx.sampleRate * 1.5);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1900;
+    bp.Q.value = 5;
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    src.connect(bp); bp.connect(g); g.connect(this.busSfx);
+    src.start();
+    this.screechSrc = src;
+    this.screechGain = g;
+  }
+
+  /** 0 = silent, 1 = full slide. Called every frame from the sim. */
+  setScreech(amount: number): void {
+    if (!this.screechGain || !this.ctx) return;
+    this.screechGain.gain.setTargetAtTime(
+      Math.max(0, Math.min(1, amount)) * 0.16, this.ctx.currentTime, 0.06
+    );
   }
 
   unlock(): void {
@@ -46,7 +101,7 @@ export class GameAudio {
         a.preload = 'auto';
         this.samples.set(file, a);
       }
-      a.volume = Math.min(1, this.volume * 1.2);
+      a.volume = Math.min(1, this.volume * this.mix.sfx * 1.2);
       a.currentTime = 0;
       void a.play().catch(() => { /* autoplay gate — ignored */ });
     } catch { /* no audio */ }
@@ -60,8 +115,8 @@ export class GameAudio {
     const ctx = this.ensure();
     if (!ctx || !this.master || this.musicTimer !== null) return;
     this.musicGain = ctx.createGain();
-    this.musicGain.gain.value = this.volume * 0.18;
-    this.musicGain.connect(this.master);
+    this.musicGain.gain.value = 0.18; // level lives on the music bus now
+    this.musicGain.connect(this.busMusic ?? this.master);
 
     // Am–F–C–G vibe: bass roots + arpeggio over a 4-bar loop
     const roots = [110, 87.31, 130.81, 98];                 // A2 F2 C3 G2
@@ -116,7 +171,8 @@ export class GameAudio {
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.value = 420;
-    this.engineGain.connect(this.master);
+    this.engineGain.connect(this.busEngine ?? this.master);
+    this.startScreech(ctx);
 
     this.engineOsc = ctx.createOscillator();
     this.engineOsc.type = 'sawtooth';
@@ -146,6 +202,12 @@ export class GameAudio {
     this.engineOsc = null;
     this.engineSub = null;
     if (this.engineGain) { this.engineGain.disconnect(); this.engineGain = null; }
+    if (this.screechSrc) {
+      try { this.screechSrc.stop(); } catch { /* already stopped */ }
+      this.screechSrc.disconnect();
+      this.screechSrc = null;
+    }
+    if (this.screechGain) { this.screechGain.disconnect(); this.screechGain = null; }
   }
 
   updateEngine(speedFrac: number, boosting: boolean): void {
@@ -164,7 +226,7 @@ export class GameAudio {
     if (!this.master) return;
     const t = ctx.currentTime + startAt;
     const g = ctx.createGain();
-    g.connect(this.master);
+    g.connect(this.busSfx ?? this.master);
     const o = ctx.createOscillator();
     o.type = type;
     o.frequency.setValueAtTime(f0, t);
@@ -194,7 +256,7 @@ export class GameAudio {
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     src.connect(filter);
     filter.connect(g);
-    g.connect(this.master);
+    g.connect(this.busSfx ?? this.master);
     src.start(t);
   }
 
