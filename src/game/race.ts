@@ -320,7 +320,7 @@ export class Race {
     // LOW raking sun (~22° elevation): long shadows and warm/cool separation are
     // where the reference gets its depth — the old 63° noon sun cast stubs and
     // "lit like a product turntable" (critic, iter 1)
-    sun.position.set(130, 62, 85);
+    sun.position.set(110, 78, 72);
     sun.castShadow = true;
     // frustum widened for the long shadows the raking angle throws
     sun.shadow.mapSize.set(2048, 2048);
@@ -689,7 +689,7 @@ export class Race {
 
     // sun follows the player so the shadow camera stays tight and crisp
     const f = this.player.pos;
-    this.sun.position.set(f.x + 130, 62, f.z + 85);
+    this.sun.position.set(f.x + 110, 78, f.z + 72);
     this.sun.target.position.set(f.x, 0, f.z);
 
     // live events

@@ -81,3 +81,10 @@ iterations. Kol is the final judge above the critic.
 | Iter | Date | Critic verdict (worst axis) | Action taken |
 |---|---|---|---|
 | 0 | 2026-08-08 | **3.0/10 overall vs 8.5/10 ref** ("REWORK — no art direction applied"; worst axes: terrain/environment 2, lighting 2) | Ranked top-8 received. Iteration 1 lanes: (A) terrain relief + shoulder scatter + landforms + road edges [track.ts], (B) cinematic grade + tilt-shift diorama pass [post.ts/main.ts], (C) night car lights — headlight pools, tail/brake lamps [carmesh/models/race]. Palette harmony retune landed in data.ts. |
+| 1 | 2026-08-08 | orchestrator gate (no critic): grade over-hot (luma-normalised tints ×2 chroma), tufts = dark X-specks, vignette hue-shifts navy→olive (bug since Phase 2) | Tint chroma mix 0.35; tufts → lit cones, clustered hero/mass; multiplicative vignette inside GradeShader (three's VignetteShader dropped); GLB foliage tint hook (desert palms). |
+| 2 | 2026-08-09 | **4.0/10** (critic 2: "lit like a product turntable"; sun too high, value range compressed, snow fog-broken, emissives too timid) | 22° raking sun + warm/cool rigs, 2048 shadow map; grade punch restored; night kerbs unlit-neon; snow rescue: terrain envMapIntensity 0.18 (IBL flood), per-theme exposure uniform, dark pine punctuation. |
+| 3 | 2026-08-09 | **3.5/10** (critic 3 — variance vs critic 2; consistent findings: AO discs = casterless blobs, ghost-smear shadows, flat beam cutouts, no aerial perspective possible in ortho) | Sun raised to ~31° (shadow length sane); AO discs centred/faded; beams 0.5 opacity; screen-space vertical aerial haze in grade (ortho-correct substitute); terrain detail speckle map; night bridge dark deck + lit rails; palm tint 0.75. Perf 4.07 ms HIGH. |
+
+**Observed inter-critic variance is ±0.5–1.0** — single-round scores are noisy; trust
+only findings that repeat across rounds, and require the exit bar over two
+consecutive rounds (already in the protocol).

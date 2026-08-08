@@ -39,7 +39,7 @@ export function attachCarLights(car: THREE.Group, frontZ: number, rearZ: number,
   const pool = new THREE.Mesh(
     new THREE.PlaneGeometry(4.6, 10.5),
     new THREE.MeshBasicMaterial({
-      map: headlightBeamTexture(), transparent: true, opacity: 0.85,
+      map: headlightBeamTexture(), transparent: true, opacity: 0.5,
       blending: THREE.AdditiveBlending, depthWrite: false,
     })
   );

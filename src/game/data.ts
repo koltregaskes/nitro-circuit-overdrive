@@ -260,7 +260,7 @@ const DESERT: TrackTheme = {
     relief: 9, landform: 'dunes', shoulder: 9,
     tuftColors: [0xb59a4e, 0xc9ae62, 0x8a8a4a, 0xa07a3e],
     tuftDensity: 20,
-    foliageTint: { color: 0x7d8a4a, amount: 0.55 },
+    foliageTint: { color: 0x7d8a4a, amount: 0.75 },
   },
   night: false,
   light: {

@@ -39,6 +39,12 @@ export const GradeShader = {
     // per-theme exposure: bright biomes (snow) stack sun+ambient past 1.0 and
     // ACES flattens the whole field to white — albedo tweaks can't fix that
     exposure: { value: 1.0 },
+    // screen-space aerial haze: under an ortho top-down camera every pixel is the
+    // same distance from the lens, so real distance fog cannot create depth.
+    // Fading the top of the frame (which the eye reads as "far") toward the fog
+    // colour is the honest substitute.
+    hazeColor: { value: new THREE.Vector3(1, 1, 1) },
+    haze: { value: 0.0 },
     // multiplicative vignette — replaces three's VignetteShader, whose
     // mix-toward-(1-darkness) target goes NEGATIVE for darkness > 1 and hue-shifts
     // dark scenes (measured: navy corners turned olive). Multiplying toward black
@@ -55,6 +61,8 @@ uniform vec3 highlightTint;
 uniform float saturation;
 uniform float contrast;
 uniform float exposure;
+uniform vec3 hazeColor;
+uniform float haze;
 uniform float vignette;
 
 varying vec2 vUv;
@@ -76,7 +84,10 @@ void main() {
   // 3. contrast about a 0.5 pivot, never letting a channel go negative
   color = max((color - 0.5) * contrast + 0.5, vec3(0.0));
 
-  // 4. multiplicative vignette — hue-safe corner falloff
+  // 4. aerial haze toward the top of the frame (see uniform comment)
+  color = mix(color, hazeColor, haze * smoothstep(0.62, 1.0, vUv.y));
+
+  // 5. multiplicative vignette — hue-safe corner falloff
   vec2 off = vUv - 0.5;
   color *= 1.0 - smoothstep(0.35, 0.85, dot(off, off) * 2.0) * vignette;
 

@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { TrackDef } from './data';
+import { TrackDef, TrackTheme } from './data';
 import { getInstanceParts, hasModel } from './models';
 
 export interface TrackSample {
@@ -249,9 +249,15 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
     }
     groundGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   }
+  // fine speckle detail multiplied under the vertex colours — per-vertex colour
+  // alone is too coarse (12u spacing) to read as a surface material
+  const groundDetail = speckleTexture(0xffffff, 0xf2f2f2, 0xd8d8d8, 900);
+  groundDetail.repeat.set(220, 220);
   const ground = new THREE.Mesh(
     groundGeo,
-    new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95 })
+    new THREE.MeshStandardMaterial({
+      vertexColors: true, flatShading: true, roughness: 0.95, map: groundDetail,
+    })
   );
   group.add(ground);
 
@@ -454,7 +460,7 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
   }
   for (const frac of def.bridges ?? []) {
     const s = samples[Math.floor(frac * n) % n];
-    group.add(buildBridge(s, halfWidth));
+    group.add(buildBridge(s, halfWidth, theme));
     // bridge pillars are solid
     for (const side of [1, -1]) {
       obstacles.push({
@@ -685,10 +691,13 @@ function buildMountainPass(
   return g;
 }
 
-// Decorative overpass crossing above the road.
-function buildBridge(s: TrackSample, halfWidth: number): THREE.Group {
+// Decorative overpass crossing above the road. At night the raw grey slab read
+// as "unfinished blockout" (critic) — dark deck + a lit edge strip instead.
+function buildBridge(s: TrackSample, halfWidth: number, theme: TrackTheme): THREE.Group {
   const g = new THREE.Group();
-  const deckMat = new THREE.MeshStandardMaterial({ color: 0x76808f, flatShading: true, roughness: 0.85 });
+  const deckMat = theme.night
+    ? new THREE.MeshStandardMaterial({ color: 0x232b3d, flatShading: true, roughness: 0.9 })
+    : new THREE.MeshStandardMaterial({ color: 0x76808f, flatShading: true, roughness: 0.85 });
   const span = halfWidth + 9;
   const deck = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.7, span * 2), deckMat);
   deck.position.copy(s.pos);
@@ -696,7 +705,11 @@ function buildBridge(s: TrackSample, halfWidth: number): THREE.Group {
   deck.rotation.y = Math.atan2(s.normal.x, s.normal.z);
   deck.castShadow = true;
   g.add(deck);
-  const rail = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.5, 0.3), deckMat);
+  // night: unlit strip rails read as the bridge's own lighting
+  const railMat = theme.night
+    ? new THREE.MeshBasicMaterial({ color: theme.stripeA })
+    : deckMat;
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.5, 0.3), railMat);
   for (const off of [2.5, -2.5]) {
     const r = rail.clone();
     r.position.copy(s.pos).addScaledVector(s.tangent, off);
@@ -852,15 +865,17 @@ function addDecor(
       const aoGeo = new THREE.CircleGeometry(1, 10);
       aoGeo.rotateX(-Math.PI / 2);
       const aoMat = new THREE.MeshBasicMaterial({
-        color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false,
+        color: 0x000000, transparent: true, opacity: 0.14, depthWrite: false,
       });
       const ao = new THREE.InstancedMesh(aoGeo, aoMat, all.length);
       ao.frustumCulled = false;
       ao.renderOrder = 1;
       const d = new THREE.Object3D();
       all.forEach((a, i) => {
-        d.position.set(a.p.x + 0.5, 0.06, a.p.z + 0.35); // offset opposite the sun
-        d.scale.setScalar(a.r);
+        // CENTRED under the prop — an offset disc next to a real directional
+        // shadow reads as a second, casterless shadow (critic, iter 2)
+        d.position.set(a.p.x, 0.06, a.p.z);
+        d.scale.setScalar(a.r * 0.8);
         d.updateMatrix();
         ao.setMatrixAt(i, d.matrix);
       });

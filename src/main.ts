@@ -227,6 +227,12 @@ class Game {
       grading.uniforms.saturation.value = grade2.saturation;
       grading.uniforms.contrast.value = grade2.contrast;
       grading.uniforms.exposure.value = grade2.exposure ?? 1;
+      // aerial haze in the theme's fog colour — the eye reads frame-top as "far"
+      const fogC = new THREE.Color().setHex(
+        this.race?.track.def.theme.fog ?? 0xffffff, THREE.LinearSRGBColorSpace
+      );
+      grading.uniforms.hazeColor.value.set(fogC.r, fogC.g, fogC.b);
+      grading.uniforms.haze.value = this.race ? 0.22 : 0;
       this.composer.addPass(grading);
 
       // miniature/diorama defocus above and below the racing band — the single
