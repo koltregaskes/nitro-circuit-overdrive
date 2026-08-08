@@ -78,6 +78,7 @@ interface Racer {
   wheelSpin: number; // accumulated wheel roll angle
   prevSpeed: number; // for accel-derived suspension pitch
   bodyPitch: number; // smoothed nose-up/nose-down
+  brakeLights: THREE.Object3D | null; // bright rear lamps, shown while braking
   // AI state
   aiOffset: number;
   aiBoostCd: number;
@@ -316,16 +317,19 @@ export class Race {
     rim.castShadow = false;
     this.scene.add(rim);
     const sun = new THREE.DirectionalLight(L.sun, L.sunIntensity);
-    sun.position.set(60, 120, 40);
+    // LOW raking sun (~22° elevation): long shadows and warm/cool separation are
+    // where the reference gets its depth — the old 63° noon sun cast stubs and
+    // "lit like a product turntable" (critic, iter 1)
+    sun.position.set(130, 62, 85);
     sun.castShadow = true;
-    // tighter map + frustum around the player: fewer casters, crisper, far cheaper
-    sun.shadow.mapSize.set(1024, 1024);
-    sun.shadow.camera.left = -70;
-    sun.shadow.camera.right = 70;
-    sun.shadow.camera.top = 70;
-    sun.shadow.camera.bottom = -70;
+    // frustum widened for the long shadows the raking angle throws
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -95;
+    sun.shadow.camera.right = 95;
+    sun.shadow.camera.top = 95;
+    sun.shadow.camera.bottom = -95;
     sun.shadow.camera.near = 10;
-    sun.shadow.camera.far = 320;
+    sun.shadow.camera.far = 420;
     sun.shadow.bias = -0.0004;
     this.scene.add(sun);
     this.scene.add(sun.target);
@@ -353,6 +357,14 @@ export class Race {
         const m = o as THREE.Mesh;
         if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; }
       });
+      // night themes: headlight pools + dim tail lamps on every car (critic fix:
+      // "a night racer where the cars don't glow is a daytime scene turned down")
+      if (theme.night) {
+        const hl = mesh.getObjectByName('headlights');
+        if (hl) { hl.visible = true; hl.traverse((o) => { (o as THREE.Mesh).castShadow = false; }); }
+        const tl = mesh.getObjectByName('taillights');
+        if (tl) tl.visible = true;
+      }
       // highlight ring under the player's car so it's always findable in the pack
       if (cfg.isPlayer) {
         const ring = new THREE.Mesh(
@@ -396,6 +408,7 @@ export class Race {
         wheelSpin: 0,
         prevSpeed: 0,
         bodyPitch: 0,
+        brakeLights: mesh.getObjectByName('brakeLights') ?? null,
         aiOffset: (Math.random() - 0.5) * track.halfWidth * 0.8,
         aiBoostCd: 2 + Math.random() * 4,
         aiItemCd: 5 + Math.random() * 6,
@@ -676,7 +689,7 @@ export class Race {
 
     // sun follows the player so the shadow camera stays tight and crisp
     const f = this.player.pos;
-    this.sun.position.set(f.x + 60, 120, f.z + 40);
+    this.sun.position.set(f.x + 130, 62, f.z + 85);
     this.sun.target.position.set(f.x, 0, f.z);
 
     // live events
@@ -1022,6 +1035,7 @@ export class Race {
     else r.wrongWay = 0;
 
     if (r.flame) r.flame.visible = r.boosting;
+    if (r.brakeLights) r.brakeLights.visible = ctrl.brake > 0.3 && r.crash <= 0;
 
     // mesh transform
     r.mesh.position.copy(r.pos);

@@ -42,7 +42,9 @@ export function mulberry32(seed: number): () => number {
 const SAMPLE_COUNT = 600;
 
 // Tileable speckle-noise texture, generated in-code (no asset files).
-function speckleTexture(base: number, light: number, dark: number, density = 1400): THREE.CanvasTexture {
+function speckleTexture(
+  base: number, light: number, dark: number, density = 1400, wearBands = false
+): THREE.CanvasTexture {
   const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = size; canvas.height = size;
@@ -58,6 +60,39 @@ function speckleTexture(base: number, light: number, dark: number, density = 140
     ctx.arc(Math.random() * size, Math.random() * size, r, 0, Math.PI * 2);
     ctx.fill();
   }
+  // road use-history (critic: "A's road is showroom-fresh"): wheel-track wear
+  // bands, a broad darkened racing line, and streaky longitudinal grime
+  if (wearBands) {
+    ctx.globalAlpha = 1;
+    for (const u of [0.32, 0.68]) {
+      const cx = u * size;
+      const grad = ctx.createLinearGradient(cx - 20, 0, cx + 20, 0);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(0.5, 'rgba(0,0,0,0.26)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(cx - 20, 0, 40, size);
+    }
+    // broad centre darkening — the polished racing line
+    const line = ctx.createLinearGradient(size * 0.18, 0, size * 0.82, 0);
+    line.addColorStop(0, 'rgba(0,0,0,0)');
+    line.addColorStop(0.5, 'rgba(0,0,0,0.10)');
+    line.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = line;
+    ctx.fillRect(0, 0, size, size);
+    // streaky grime: short random longitudinal scuffs
+    for (let i = 0; i < 60; i++) {
+      const x = size * (0.2 + Math.random() * 0.6);
+      const y0 = Math.random() * size;
+      const len = 8 + Math.random() * 30;
+      ctx.strokeStyle = Math.random() < 0.7 ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.06)';
+      ctx.lineWidth = 1 + Math.random() * 2;
+      ctx.beginPath();
+      ctx.moveTo(x, y0);
+      ctx.lineTo(x + (Math.random() - 0.5) * 3, y0 + len);
+      ctx.stroke();
+    }
+  }
   ctx.globalAlpha = 1;
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.RepeatWrapping;
@@ -70,9 +105,61 @@ function shade(color: number, f: number): number {
   return c.getHex();
 }
 
+// Lit-window grid for the night-city towers: mostly dark, a scatter of warm and
+// neon panes. One shared texture; each tower face stretches it, which at this
+// art scale reads as intended stylisation rather than tiling error.
+let windowTexCache: THREE.CanvasTexture | null = null;
+function cityWindowTexture(): THREE.CanvasTexture {
+  if (windowTexCache) return windowTexCache;
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 128;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#05070d';
+  ctx.fillRect(0, 0, 64, 128);
+  const lit = ['#7fd4e0', '#d44a8a', '#ffd28a', '#9ad4e0', '#ffc83d'];
+  for (let gy = 0; gy < 14; gy++) {
+    for (let gx = 0; gx < 5; gx++) {
+      if (Math.random() < 0.32) {
+        ctx.fillStyle = lit[Math.floor(Math.random() * lit.length)];
+        ctx.globalAlpha = 0.55 + Math.random() * 0.45;
+        ctx.fillRect(4 + gx * 12, 4 + gy * 9, 6, 4);
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+  windowTexCache = new THREE.CanvasTexture(c);
+  return windowTexCache;
+}
+
+// Seeded 2-octave value noise (0..1) — terrain relief must stay deterministic
+// per (def, seed), so no Math.random and no external noise dependency.
+function makeNoise2D(rng: () => number): (x: number, z: number) => number {
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const t = p[i]; p[i] = p[j]; p[j] = t;
+  }
+  const perm = new Uint8Array(512);
+  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+  const lattice = (ix: number, iz: number) => perm[(perm[ix & 255] + iz) & 255] / 255;
+  const smooth = (t: number) => t * t * (3 - 2 * t);
+  const single = (x: number, z: number) => {
+    const ix = Math.floor(x), iz = Math.floor(z);
+    const fx = smooth(x - ix), fz = smooth(z - iz);
+    const a = lattice(ix, iz), b = lattice(ix + 1, iz);
+    const c = lattice(ix, iz + 1), d = lattice(ix + 1, iz + 1);
+    return a + (b - a) * fx + (c - a) * fz + (a - b - c + d) * fx * fz;
+  };
+  return (x: number, z: number) => single(x, z) * 0.7 + single(x * 2.13 + 37, z * 2.13 + 91) * 0.3;
+}
+
 // Built tracks are deterministic for (def, seed) and immutable after build, so cache
 // and reuse them across races — eliminates the per-race build hitch on repeat tracks.
 const trackCache = new Map<string, BuiltTrack>();
+
+// guards against double-tinting a cached GLB foliage material on track rebuilds
+const tintedFoliage = new Set<string>();
 
 export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
   const cacheKey = def.id + ':' + seed;
@@ -112,35 +199,91 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
   const halfWidth = def.width / 2;
   const theme = def.theme;
 
-  // ---- ground plane ----
-  const groundTex = speckleTexture(theme.ground, shade(theme.ground, 1.18), shade(theme.ground, 0.8));
-  groundTex.repeat.set(180, 180);
+  // ---- terrain (gauntlet iteration 1: kill the flat-plane read) ----
+  // Displaced ground with a flattened corridor around the racing line: the sim
+  // stays 2D (cars at y=0) while everything beyond the shoulder gains relief.
+  const noise = makeNoise2D(rng);
+  const relief = theme.env.relief;
+  const corridorInner = halfWidth + theme.env.shoulder + 4;
+  const corridorOuter = corridorInner + 40;
+  // coarse nearest-centre-line distance — every 3rd sample is plenty for a mask
+  const corridorDist = (x: number, z: number): number => {
+    let d2 = Infinity;
+    for (let i = 0; i < samples.length; i += 3) {
+      const dx = samples[i].pos.x - x, dz = samples[i].pos.z - z;
+      const d = dx * dx + dz * dz;
+      if (d < d2) d2 = d;
+    }
+    return Math.sqrt(d2);
+  };
+  const smoothstep = (a: number, b: number, t: number) => {
+    const k = THREE.MathUtils.clamp((t - a) / (b - a), 0, 1);
+    return k * k * (3 - 2 * k);
+  };
+  /** Terrain height at a world point — shared by the mesh, scatter and landforms. */
+  const groundHeightAt = (x: number, z: number): number => {
+    if (relief <= 0) return 0;
+    const h = (noise(x / 90, z / 90) - 0.5) * 2 * relief;
+    return h * smoothstep(corridorInner, corridorOuter, corridorDist(x, z));
+  };
+
+  const GROUND_SEGS = 140;
+  const groundGeo = new THREE.PlaneGeometry(1800, 1800, GROUND_SEGS, GROUND_SEGS);
+  groundGeo.rotateX(-Math.PI / 2); // plane XY → world XZ, +y up
+  {
+    const pos = groundGeo.attributes.position as THREE.BufferAttribute;
+    const colors = new Float32Array(pos.count * 3);
+    const cBase = new THREE.Color(theme.ground);
+    const cAlt = new THREE.Color(theme.groundAlt);
+    const c = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      const h = groundHeightAt(x, z);
+      pos.setY(i, h - 0.05);
+      // colour script: dips read darker, crests catch light; a second noise
+      // channel swaps toward groundAlt so the field never reads as one flat fill
+      c.copy(cBase).lerp(cAlt, noise(x / 47 + 130, z / 47 + 55));
+      const lift = h >= 0 ? 1 + (h / Math.max(relief, 1)) * 0.10 : 1 + (h / Math.max(relief, 1)) * 0.12;
+      c.multiplyScalar(lift);
+      colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+    }
+    groundGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  }
   const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(900, 48),
-    new THREE.MeshLambertMaterial({ color: 0xffffff, map: groundTex })
+    groundGeo,
+    new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95 })
   );
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -0.05;
   group.add(ground);
 
-  // ground variation discs
-  const discMat = new THREE.MeshLambertMaterial({ color: theme.groundAlt });
-  for (let i = 0; i < 40; i++) {
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(6 + rng() * 18, 14), discMat);
-    disc.rotation.x = -Math.PI / 2;
-    disc.position.set((rng() - 0.5) * 500, -0.03, (rng() - 0.5) * 500);
-    group.add(disc);
-  }
-
   // ---- road ribbon ----
-  const roadTex = speckleTexture(theme.road, shade(theme.road, 1.25), shade(theme.road, 0.72), 2200);
+  const roadTex = speckleTexture(theme.road, shade(theme.road, 1.25), shade(theme.road, 0.72), 2200, true);
   group.add(buildRibbon(samples, -halfWidth, halfWidth, 0.0, roadTex, segLength));
   // edge stripes (kerbs), alternating colors
   const stripeW = 0.9;
-  group.add(buildKerb(samples, halfWidth, halfWidth + stripeW, theme.stripeA, theme.stripeB, 0.01));
-  group.add(buildKerb(samples, -halfWidth - stripeW, -halfWidth, theme.stripeA, theme.stripeB, 0.01));
+  group.add(buildKerb(samples, halfWidth, halfWidth + stripeW, theme.stripeA, theme.stripeB, 0.01, theme.night));
+  group.add(buildKerb(samples, -halfWidth - stripeW, -halfWidth, theme.stripeA, theme.stripeB, 0.01, theme.night));
   // centre dashes
   group.add(buildDashes(samples, 0.25, 0xdedede, 0.012));
+
+  // road-edge presentation: a darkened embankment bevel beyond each kerb plus a
+  // soft drop shadow, so the road sits ON the ground instead of floating as a
+  // decal ("no shoulder, no thickness, no edge shadow" — critic, iter 0)
+  const embMat = new THREE.MeshStandardMaterial({
+    color: shade(theme.ground, 0.8), flatShading: true, roughness: 0.95, side: THREE.DoubleSide,
+  });
+  const shadowMat = new THREE.MeshBasicMaterial({
+    color: 0x000000, transparent: true, opacity: 0.26, depthWrite: false,
+  });
+  for (const side of [1, -1]) {
+    const a = side * (halfWidth + stripeW);
+    const emb = buildRibbon(samples, a, a + side * 1.6, 0.055, null, segLength);
+    emb.material = embMat;
+    group.add(emb);
+    const sh = buildRibbon(samples, a, a + side * 0.6, 0.09, null, segLength);
+    sh.material = shadowMat;
+    sh.renderOrder = 1;
+    group.add(sh);
+  }
 
   // ---- start line ----
   group.add(buildStartLine(samples[0], halfWidth));
@@ -148,6 +291,159 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
   // ---- decorations (also collect solid obstacles for collision) ----
   const obstacles: Obstacle[] = [];
   addDecor(group, samples, halfWidth, def, rng, obstacles);
+
+  // ---- ground-cover scatter: the near-field density that frames the road ----
+  // One InstancedMesh of crossed-quad tufts: a dense band hugging both shoulders
+  // plus looser meadow clumps further out. Purely visual — never an obstacle.
+  {
+    // low-poly cone: from the top-down camera crossed quads collapse into "X"
+    // artefacts, while a faceted cone reads as a chunky shrub AND catches the
+    // sun on its upward-facing facets
+    const tuftGeo = new THREE.ConeGeometry(0.5, 1, 5);
+    tuftGeo.translate(0, 0.5, 0); // pivot at the base so scale.y = height
+    interface TuftPlace { x: number; y: number; z: number; s: number; w: number; yaw: number; lean: number; c: THREE.Color; }
+    const places: TuftPlace[] = [];
+    const palette = theme.env.tuftColors.map((c) => new THREE.Color(c));
+    const pick = () => {
+      const c = palette[Math.floor(rng() * palette.length)].clone();
+      return c.multiplyScalar(0.92 + rng() * 0.16);
+    };
+    // shoulder verge, both sides — CLUSTERED, not uniform: "uniform-density noise
+    // at a single size class reads as debris; clustered masses read as intent"
+    // (critic). Each cluster = one hero tuft + a graded mass around it.
+    const clusterEvery = Math.max(4, Math.round(9 / (theme.env.tuftDensity / 24)));
+    for (const side of [1, -1]) {
+      for (let i = 0; i < n; i += clusterEvery + Math.floor(rng() * clusterEvery)) {
+        const s = samples[i];
+        const lateral = halfWidth + 2.0 + rng() * Math.max(1, theme.env.shoulder - 2.6);
+        const cx = s.pos.x + s.normal.x * side * lateral;
+        const cz = s.pos.z + s.normal.z * side * lateral;
+        const members = 3 + Math.floor(rng() * 5);
+        const heroC = pick();
+        for (let j = 0; j < members; j++) {
+          const hero = j === 0;
+          const spread = hero ? 0 : 1.0 + rng() * 2.6;
+          const a = rng() * Math.PI * 2;
+          const x = cx + Math.cos(a) * spread, z = cz + Math.sin(a) * spread;
+          places.push({
+            x, z, y: groundHeightAt(x, z),
+            s: hero ? 1.5 + rng() * 0.8 : 0.55 + rng() * 0.75,
+            w: hero ? 1.9 + rng() * 0.9 : 0.9 + rng() * 0.9,
+            yaw: rng() * Math.PI,
+            lean: (rng() - 0.5) * 0.24,
+            // members echo the hero's colour so the cluster reads as one plant mass
+            c: hero ? heroC : heroC.clone().lerp(palette[Math.floor(rng() * palette.length)], 0.4),
+          });
+        }
+      }
+    }
+    // meadow clumps off-corridor
+    const clumps = 90;
+    for (let k = 0; k < clumps; k++) {
+      const cx = (rng() - 0.5) * 1000, cz = (rng() - 0.5) * 1000;
+      if (corridorDist(cx, cz) < corridorInner + 2) continue;
+      const m = 5 + Math.floor(rng() * 8);
+      for (let j = 0; j < m; j++) {
+        const x = cx + (rng() - 0.5) * 12, z = cz + (rng() - 0.5) * 12;
+        places.push({
+          x, z, y: groundHeightAt(x, z),
+          s: 0.8 + rng() * 1.0, w: 1.2 + rng() * 1.1,
+          yaw: rng() * Math.PI, lean: (rng() - 0.5) * 0.3, c: pick(),
+        });
+      }
+    }
+    // lit + flat-shaded: cone facets face partly upward, so the top-down sun
+    // shades them properly (the earlier vertical quads rendered as dark debris)
+    const tuftMat = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.9 });
+    const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, places.length);
+    tufts.frustumCulled = false;
+    tufts.castShadow = false;
+    const dm = new THREE.Object3D();
+    places.forEach((t, i) => {
+      dm.position.set(t.x, t.y, t.z);
+      dm.rotation.set(t.lean, t.yaw, 0, 'YXZ');
+      dm.scale.set(t.w, t.s, t.w);
+      dm.updateMatrix();
+      tufts.setMatrixAt(i, dm.matrix);
+      tufts.setColorAt(i, t.c);
+    });
+    tufts.instanceMatrix.needsUpdate = true;
+    if (tufts.instanceColor) tufts.instanceColor.needsUpdate = true;
+    group.add(tufts);
+  }
+
+  // ---- landforms: silhouette interest beyond the play field ----
+  // ("A has literally nothing behind or beside the action" — critic, iter 0)
+  {
+    const kind = theme.env.landform;
+    const domeGeo = new THREE.SphereGeometry(1, 9, 5, 0, Math.PI * 2, 0, Math.PI / 2);
+    const place = (minR: number, maxR: number): { x: number; z: number } | null => {
+      for (let tries = 0; tries < 24; tries++) {
+        const a = rng() * Math.PI * 2;
+        const r = minR + rng() * (maxR - minR);
+        const x = Math.cos(a) * r, z = Math.sin(a) * r;
+        if (corridorDist(x, z) > halfWidth + 60) return { x, z };
+      }
+      return null;
+    };
+    const dm = new THREE.Object3D();
+    if (kind === 'city') {
+      // ring of dark towers with lit windows — the night-street backdrop.
+      // Sides get the emissive window grid; roofs stay dark (camera looks down).
+      const towerGeo = new THREE.BoxGeometry(1, 1, 1);
+      towerGeo.translate(0, 0.5, 0);
+      const winTex = cityWindowTexture();
+      const sideMat = new THREE.MeshStandardMaterial({
+        color: 0x0d1220, flatShading: true, roughness: 0.9,
+        emissive: 0xffffff, emissiveMap: winTex, emissiveIntensity: 1.15,
+      });
+      const roofMat = new THREE.MeshStandardMaterial({ color: 0x0a0e18, flatShading: true, roughness: 0.95 });
+      const mats = [sideMat, sideMat, roofMat, roofMat, sideMat, sideMat];
+      const towers = new THREE.InstancedMesh(towerGeo, mats, 26);
+      towers.frustumCulled = false;
+      let ti = 0;
+      for (let k = 0; k < 26; k++) {
+        const p = place(170, 470);
+        if (!p) continue;
+        dm.position.set(p.x, 0, p.z);
+        dm.rotation.set(0, rng() * Math.PI * 2, 0);
+        dm.scale.set(14 + rng() * 24, 22 + rng() * 68, 14 + rng() * 24);
+        dm.updateMatrix();
+        towers.setMatrixAt(ti++, dm.matrix);
+      }
+      towers.count = ti;
+      towers.instanceMatrix.needsUpdate = true;
+      group.add(towers);
+    } else {
+      const domeCount = kind === 'dunes' ? 15 : kind === 'drifts' ? 12 : 11;
+      const base = new THREE.Color(kind === 'drifts' ? shade(theme.ground, 1.06) : shade(theme.ground, 0.9));
+      const domeMat = new THREE.MeshStandardMaterial({ color: base, flatShading: true, roughness: 0.95 });
+      const domes = new THREE.InstancedMesh(domeGeo, domeMat, domeCount);
+      domes.frustumCulled = false;
+      const windDir = rng() * Math.PI; // dunes share one prevailing wind
+      let di = 0;
+      for (let k = 0; k < domeCount; k++) {
+        const p = place(140, 460);
+        if (!p) continue;
+        dm.position.set(p.x, -0.5, p.z);
+        if (kind === 'dunes') {
+          dm.rotation.set(0, windDir + (rng() - 0.5) * 0.5, 0);
+          dm.scale.set(60 + rng() * 80, 6 + rng() * 9, 18 + rng() * 14);
+        } else if (kind === 'drifts') {
+          dm.rotation.set(0, rng() * Math.PI, 0);
+          dm.scale.set(20 + rng() * 32, 4 + rng() * 6, 16 + rng() * 22);
+        } else { // hills
+          dm.rotation.set(0, rng() * Math.PI, 0);
+          dm.scale.set(35 + rng() * 55, 9 + rng() * 12, 30 + rng() * 50);
+        }
+        dm.updateMatrix();
+        domes.setMatrixAt(di++, dm.matrix);
+      }
+      domes.count = di;
+      domes.instanceMatrix.needsUpdate = true;
+      group.add(domes);
+    }
+  }
 
   // ---- features: tunnel-through-mountain + bridges ----
   if (def.tunnel) {
@@ -202,7 +498,7 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
 
 function buildRibbon(
   samples: TrackSample[], from: number, to: number, y: number,
-  map: THREE.Texture, segLength: number
+  map: THREE.Texture | null, segLength: number
 ): THREE.Mesh {
   const n = samples.length;
   const positions = new Float32Array(n * 2 * 3);
@@ -223,11 +519,12 @@ function buildRibbon(
   geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   geo.setIndex(indices);
   geo.computeVertexNormals();
-  return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map, side: THREE.DoubleSide }));
+  return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: map ?? undefined, side: THREE.DoubleSide }));
 }
 
 function buildKerb(
-  samples: TrackSample[], from: number, to: number, colA: number, colB: number, y: number
+  samples: TrackSample[], from: number, to: number, colA: number, colB: number, y: number,
+  unlit = false
 ): THREE.Mesh {
   const n = samples.length;
   const positions = new Float32Array(n * 2 * 3);
@@ -249,8 +546,12 @@ function buildKerb(
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.setIndex(indices);
   geo.computeVertexNormals();
-  // lit kerbs (no glow) — solid painted red/white edge lines
-  return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  // day: lit painted kerbs. night: unlit — the stripes read as lit neon edging
+  // against the dark road, giving night its emissive anchors at zero cost
+  const mat = unlit
+    ? new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })
+    : new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  return new THREE.Mesh(geo, mat);
 }
 
 function buildDashes(samples: TrackSample[], halfW: number, color: number, y: number): THREE.Mesh {
@@ -528,10 +829,46 @@ function addDecor(
     }
   }
 
+  // ---- contact shadows: a soft dark disc under every prop grounds it ----
+  // (cheap stand-in for per-prop AO; without it props float on the ground plane)
+  {
+    const all: { p: THREE.Vector3; r: number }[] = [];
+    for (const list of byModel.values()) {
+      for (const it of list) all.push({ p: it.p, r: 0.65 + it.height * 0.16 });
+    }
+    if (all.length) {
+      const aoGeo = new THREE.CircleGeometry(1, 10);
+      aoGeo.rotateX(-Math.PI / 2);
+      const aoMat = new THREE.MeshBasicMaterial({
+        color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false,
+      });
+      const ao = new THREE.InstancedMesh(aoGeo, aoMat, all.length);
+      ao.frustumCulled = false;
+      ao.renderOrder = 1;
+      const d = new THREE.Object3D();
+      all.forEach((a, i) => {
+        d.position.set(a.p.x + 0.5, 0.06, a.p.z + 0.35); // offset opposite the sun
+        d.scale.setScalar(a.r);
+        d.updateMatrix();
+        ao.setMatrixAt(i, d.matrix);
+      });
+      ao.instanceMatrix.needsUpdate = true;
+      group.add(ao);
+    }
+  }
+
   // ---- build one InstancedMesh per model part (the 140-draw-call → ~handful win) ----
   const dummy = new THREE.Object3D();
   for (const [name, list] of byModel) {
     for (const part of getInstanceParts(name)) {
+      // harmonise baked GLB foliage colours with the biome (tree lists are
+      // theme-exclusive, so tinting the cached per-name material once is safe)
+      const tintSpec = theme.env.foliageTint;
+      if (tintSpec && theme.trees.includes(name) && !tintedFoliage.has(name + ':' + part.material.uuid)) {
+        tintedFoliage.add(name + ':' + part.material.uuid);
+        const m = part.material as THREE.MeshStandardMaterial;
+        if (m.color) m.color.lerp(new THREE.Color(tintSpec.color), tintSpec.amount);
+      }
       const inst = new THREE.InstancedMesh(part.geometry, part.material, list.length);
       inst.castShadow = true;
       inst.receiveShadow = true;

@@ -9,8 +9,6 @@ import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { FilmPass } from 'three/examples/jsm/postprocessing/FilmPass.js';
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { VignetteShader } from 'three/examples/jsm/shaders/VignetteShader.js';
-import { HueSaturationShader } from 'three/examples/jsm/shaders/HueSaturationShader.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
@@ -22,6 +20,7 @@ import {
   resetProfile, saveProfile,
 } from './game/save';
 import { buildTrack } from './game/track';
+import { GradeShader, TiltShiftShader } from './game/post';
 import { PlayerInput, Race, RaceMode, RaceResult, RacerConfig } from './game/race';
 import { GameAudio } from './game/audio';
 import { PLAYER_CAR_MODELS, RIVAL_MODELS, ensureModelsLoaded } from './game/models';
@@ -88,6 +87,7 @@ class Game {
   private composer: EffectComposer | null = null;
   private bloomPass: UnrealBloomPass | null = null;
   private gtaoPass: GTAOPass | null = null;
+  private tiltShiftPass: ShaderPass | null = null;
   private padPrev: boolean[] = [];
   private lastW = 0;
   private lastH = 0;
@@ -162,6 +162,9 @@ class Game {
     this.lastH = h;
     this.renderer.setSize(w, h);
     this.composer?.setSize(w, h);
+    // tilt-shift blur radius is expressed in 720p-equivalent pixels, so the pass
+    // needs the live composer size to stay resolution-independent
+    this.tiltShiftPass?.uniforms.resolution.value.set(w, h);
     // root font-size scales the (rem-based) UI with the smaller viewport axis,
     // so menus stay proportional on any display without a fixed clipped stage
     const fs = Math.max(11, Math.min(20, Math.min(w / 95, h / 54)));
@@ -173,7 +176,11 @@ class Game {
     this.disposeComposer();
     const w = window.innerWidth, h = window.innerHeight;
     const quality = this.profile.settings.quality;
-    const grade = this.race?.track.def.theme.grade ?? { hue: 0, saturation: 0 };
+    // neutral fallback while no track is loaded (menu backdrop, photo mode boot)
+    const grade2 = this.race?.track.def.theme.grade2 ?? {
+      shadowTint: 0xffffff, highlightTint: 0xffffff,
+      saturation: 1, contrast: 1, tiltShift: 0,
+    };
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(scene, this.camera));
 
@@ -193,17 +200,49 @@ class Game {
     this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.18, 0.4, 0.95);
     this.composer.addPass(this.bloomPass);
 
-    // medium+: cinematic grade — vignette, per-theme hue/sat push, fine film grain
+    // medium+: cinematic grade — split-tone, tilt-shift, vignette, fine film grain
     if (quality !== 'low') {
-      const vignette = new ShaderPass(VignetteShader);
-      vignette.uniforms.offset.value = 1.15;
-      vignette.uniforms.darkness.value = 1.1;
-      this.composer.addPass(vignette);
+      // Theme tints are authored as colours, not multipliers (a shadow tint like
+      // 0x33502e would otherwise crush the darks to black), so normalise each to
+      // unit rec709 luminance: the hue survives, the exposure doesn't move.
+      const tint = (hex: number): THREE.Vector3 => {
+        // read the hex verbatim (no working-colour-space conversion) — the grade
+        // runs on the tone-mapped composer buffer, not on scene-linear radiance
+        const c = new THREE.Color().setHex(hex, THREE.LinearSRGBColorSpace);
+        const luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+        const k = luma > 1e-4 ? 1 / luma : 1;
+        // GAUNTLET iter-1 fix: luma-normalising a saturated dark colour (night's
+        // 0x101830) yields a multiplier with ~2x chroma on one channel and floods
+        // the frame. Pull the normalised tint most of the way back toward white —
+        // the hue whispers instead of shouting.
+        const MIX = 0.45; // how much of the tint's chroma survives
+        return new THREE.Vector3(
+          1 + (c.r * k - 1) * MIX, 1 + (c.g * k - 1) * MIX, 1 + (c.b * k - 1) * MIX
+        );
+      };
 
-      const grading = new ShaderPass(HueSaturationShader);
-      grading.uniforms.hue.value = grade.hue;
-      grading.uniforms.saturation.value = grade.saturation;
+      const grading = new ShaderPass(GradeShader);
+      grading.uniforms.shadowTint.value.copy(tint(grade2.shadowTint));
+      grading.uniforms.highlightTint.value.copy(tint(grade2.highlightTint));
+      grading.uniforms.saturation.value = grade2.saturation;
+      grading.uniforms.contrast.value = grade2.contrast;
       this.composer.addPass(grading);
+
+      // miniature/diorama defocus above and below the racing band — the single
+      // biggest "this is a model railway" cue on a top-down camera
+      if (grade2.tiltShift > 0) {
+        const tiltShift = new ShaderPass(TiltShiftShader);
+        tiltShift.uniforms.resolution.value.set(w, h);
+        tiltShift.uniforms.strength.value = grade2.tiltShift;
+        tiltShift.uniforms.focusCenter.value = 0.55;
+        tiltShift.uniforms.focusWidth.value = 0.34;
+        this.composer.addPass(tiltShift);
+        this.tiltShiftPass = tiltShift;
+      }
+
+      // vignette now lives inside GradeShader as a hue-safe multiply — three's
+      // VignetteShader hue-shifted dark scenes (darkness > 1 mixes toward a
+      // negative constant; measured navy → olive in night corners)
 
       // FilmPass(intensity, grayscale) — keep grain barely-there
       this.composer.addPass(new FilmPass(0.18, false));
@@ -223,6 +262,7 @@ class Game {
     this.composer = null;
     this.bloomPass = null;
     this.gtaoPass = null;
+    this.tiltShiftPass = null;
   }
 
   /** Poll the first connected gamepad (standard/Xbox mapping). */

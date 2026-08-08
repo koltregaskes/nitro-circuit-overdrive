@@ -3,6 +3,87 @@
 import * as THREE from 'three';
 import { attachWheelRig } from './models';
 
+// Shared gradient texture for the ground-projected headlight pool (night themes).
+// Bright at the car's nose, fading to nothing — additive, so it reads as light.
+let beamTex: THREE.CanvasTexture | null = null;
+function headlightBeamTexture(): THREE.CanvasTexture {
+  if (beamTex) return beamTex;
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 128;
+  const ctx = c.getContext('2d')!;
+  const grad = ctx.createLinearGradient(0, 128, 0, 0);
+  grad.addColorStop(0, 'rgba(255,244,214,0.85)');
+  grad.addColorStop(0.55, 'rgba(255,240,200,0.28)');
+  grad.addColorStop(1, 'rgba(255,238,190,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  // trapezoid: narrow at the car, spreading forward
+  ctx.moveTo(22, 128); ctx.lineTo(42, 128); ctx.lineTo(64, 0); ctx.lineTo(0, 0);
+  ctx.closePath();
+  ctx.fill();
+  beamTex = new THREE.CanvasTexture(c);
+  return beamTex;
+}
+
+/**
+ * Attach night-driving lights to any car: a ground-projected headlight pool
+ * (name `headlights`, off by default — the race turns it on for night themes),
+ * dim always-on tail lamps (`taillights`, night only) and bright brake lamps
+ * (`brakeLights`, driven by the sim every frame).
+ */
+export function attachCarLights(car: THREE.Group, frontZ: number, rearZ: number, y = 0.5): void {
+  const head = new THREE.Group();
+  head.name = 'headlights';
+  // sized to READ at gameplay zoom — the subtle version was invisible to a
+  // fresh critic, and too-subtle-to-see equals absent
+  const pool = new THREE.Mesh(
+    new THREE.PlaneGeometry(4.6, 10.5),
+    new THREE.MeshBasicMaterial({
+      map: headlightBeamTexture(), transparent: true, opacity: 0.85,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+  );
+  pool.rotation.x = -Math.PI / 2;
+  pool.position.set(0, 0.07, frontZ + 5.4);
+  head.add(pool);
+  for (const x of [-0.5, 0.5]) {
+    const lamp = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.12, 0.06),
+      new THREE.MeshBasicMaterial({ color: 0xfff6cf })
+    );
+    lamp.position.set(x, y, frontZ + 0.04);
+    head.add(lamp);
+  }
+  head.visible = false;
+  car.add(head);
+
+  const tail = new THREE.Group();
+  tail.name = 'taillights';
+  for (const x of [-0.5, 0.5]) {
+    const lamp = new THREE.Mesh(
+      new THREE.BoxGeometry(0.26, 0.1, 0.05),
+      new THREE.MeshBasicMaterial({ color: 0x7a1420 })
+    );
+    lamp.position.set(x, y, rearZ - 0.03);
+    tail.add(lamp);
+  }
+  tail.visible = false;
+  car.add(tail);
+
+  const brake = new THREE.Group();
+  brake.name = 'brakeLights';
+  for (const x of [-0.5, 0.5]) {
+    const lamp = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 0.14, 0.07),
+      new THREE.MeshBasicMaterial({ color: 0xff2431 })
+    );
+    lamp.position.set(x, y, rearZ - 0.05);
+    brake.add(lamp);
+  }
+  brake.visible = false;
+  car.add(brake);
+}
+
 export function buildCarMesh(color: number, accent: number, carNum: string): THREE.Group {
   const g = new THREE.Group();
   // flat-shaded standard mats: faceted forms that catch the env map like the GLB cars
@@ -97,6 +178,8 @@ export function buildCarMesh(color: number, accent: number, carNum: string): THR
   flame.position.set(0, 0.5, -2.45);
   flame.visible = false;
   g.add(flame);
+
+  attachCarLights(g, 2.3, -1.75, 0.5);
 
   return g;
 }

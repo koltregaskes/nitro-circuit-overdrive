@@ -2,6 +2,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { attachCarLights } from './carmesh';
 
 const loader = new GLTFLoader();
 const cache = new Map<string, THREE.Group>();
@@ -282,6 +283,9 @@ export function buildCarFromModel(name: string, color: number, carNum: string): 
   flame.position.set(0, 0.55, box.min.z - 0.55);
   flame.visible = false;
   car.add(flame);
+
+  // night-driving lights, positioned from the model's real nose/tail
+  attachCarLights(car, box.max.z, box.min.z, Math.min(0.62, box.max.y * 0.55));
 
   return car;
 }

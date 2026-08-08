@@ -159,6 +159,27 @@ export interface ThemeLighting {
   rimIntensity: number;
 }
 
+/** Cinematic grade (gauntlet iteration 1) — replaces the old weak hue/sat pass. */
+export interface ThemeGrade {
+  shadowTint: number;    // multiplied into darks (colour-script shadows, e.g. blue snow)
+  highlightTint: number; // multiplied into brights (warm sun)
+  saturation: number;    // 1 = neutral
+  contrast: number;      // 1 = neutral, pivot 0.5
+  tiltShift: number;     // 0..1 miniature-diorama blur strength
+}
+
+/** Terrain + ground-cover parameters (gauntlet iteration 1). */
+export interface ThemeEnvironment {
+  relief: number;        // ground displacement amplitude in world units (0 = flat)
+  landform: 'hills' | 'dunes' | 'drifts' | 'city';
+  shoulder: number;      // scatter band width beyond the kerb, world units
+  tuftColors: number[];  // ground-cover palette (per-instance jitter picks from these)
+  tuftDensity: number;   // shoulder instances per 100 world units of track length
+  /** Pull GLB foliage materials toward a harmony colour (fixes e.g. mint palms
+   * clashing with ochre sand — GLB models carry their own baked colours). */
+  foliageTint?: { color: number; amount: number };
+}
+
 export interface TrackTheme {
   ground: number;
   groundAlt: number;
@@ -169,7 +190,9 @@ export interface TrackTheme {
   fog: number;
   skyTop: number;       // sky-dome zenith colour (horizon = fog colour)
   fogDensity: number;   // FogExp2 density
-  grade: { hue: number; saturation: number }; // post-stack colour grade (-1..1)
+  grade: { hue: number; saturation: number }; // legacy — superseded by grade2
+  grade2: ThemeGrade;
+  env: ThemeEnvironment;
   night: boolean;       // nocturnal lighting rig
   light: ThemeLighting;
   trees: string[];  // GLB model names (see models.ts)
@@ -193,17 +216,27 @@ export interface TrackDef {
 }
 
 const FOREST: TrackTheme = {
-  ground: 0x5d8a3c, groundAlt: 0x55803a, road: 0x4a4a52,
+  ground: 0x678a4d, groundAlt: 0x597c43, road: 0x4a4a52,
   stripeA: 0xd9d9d9, stripeB: 0xc23b3b,
   foliage: [0xd97f30, 0xc9522e, 0xe0a832, 0x4d7a33, 0xb33b2e],
   fog: 0xbcc8a8,
   skyTop: 0x87b0dd, fogDensity: 0.0020,
   grade: { hue: 0.0, saturation: 0.12 },
+  grade2: {
+    shadowTint: 0x33502e, highlightTint: 0xfff2d2,
+    saturation: 1.08, contrast: 1.11, tiltShift: 0.55,
+  },
+  env: {
+    relief: 6, landform: 'hills', shoulder: 11,
+    tuftColors: [0x67974a, 0x7fae54, 0x4f7d38, 0xd98a3a, 0xc9522e],
+    tuftDensity: 34,
+  },
   night: false,
   light: {
-    sun: 0xfff2dc, sunIntensity: 2.0,
-    ambient: 0xcfe0ff, ambientIntensity: 0.38,
-    hemiSky: 0xeaf2ff, hemiGround: 0x6b7a4a, hemiIntensity: 0.4,
+    // golden-hour key + cool blue fill: warm/cool separation is the whole game
+    sun: 0xffd9a0, sunIntensity: 2.6,
+    ambient: 0xb8cdf5, ambientIntensity: 0.30,
+    hemiSky: 0xcfe2ff, hemiGround: 0x5d6f42, hemiIntensity: 0.5,
     rim: 0x9ec8ff, rimIntensity: 0.55,
   },
   trees: ['tree_default_fall', 'tree_oak_fall', 'tree_detailed_fall', 'tree_simple_fall'],
@@ -211,17 +244,28 @@ const FOREST: TrackTheme = {
 };
 
 const DESERT: TrackTheme = {
-  ground: 0xc9954f, groundAlt: 0xbd8a46, road: 0x55514f,
+  ground: 0xcf9a55, groundAlt: 0xc08c48, road: 0x5c554d,
   stripeA: 0xe8e3d4, stripeB: 0xc25b2e,
-  foliage: [0x6f8a3a, 0x8aa04a, 0xb3793a],
-  fog: 0xe3cfa3,
-  skyTop: 0x8ab6e0, fogDensity: 0.0016,
+  // critic: mint-on-butterscotch collision — palms move to dusty olive/sage
+  foliage: [0x7d8a4a, 0x93a058, 0x6e7a40],
+  fog: 0xe6cf9f,
+  skyTop: 0x93b8dd, fogDensity: 0.0016,
   grade: { hue: 0.01, saturation: 0.10 },
+  grade2: {
+    shadowTint: 0x4d3a54, highlightTint: 0xffe9bd,
+    saturation: 1.08, contrast: 1.11, tiltShift: 0.5,
+  },
+  env: {
+    relief: 9, landform: 'dunes', shoulder: 9,
+    tuftColors: [0xb59a4e, 0xc9ae62, 0x8a8a4a, 0xa07a3e],
+    tuftDensity: 20,
+    foliageTint: { color: 0x7d8a4a, amount: 0.55 },
+  },
   night: false,
   light: {
-    sun: 0xffe9c4, sunIntensity: 2.2,
-    ambient: 0xffe7c9, ambientIntensity: 0.34,
-    hemiSky: 0xfdf3df, hemiGround: 0xa8874f, hemiIntensity: 0.42,
+    sun: 0xffce8a, sunIntensity: 2.8,
+    ambient: 0xc4b8e8, ambientIntensity: 0.28, // cool violet fill vs hot sand
+    hemiSky: 0xf0e0c8, hemiGround: 0x9a7a48, hemiIntensity: 0.42,
     rim: 0x9ec8ff, rimIntensity: 0.5,
   },
   trees: ['tree_palm', 'tree_palmShort', 'tree_palmTall'],
@@ -229,17 +273,29 @@ const DESERT: TrackTheme = {
 };
 
 const SNOW: TrackTheme = {
-  ground: 0xdde6ee, groundAlt: 0xd2dde8, road: 0x4e545e,
+  ground: 0xe4ebf2, groundAlt: 0xd3dfeb, road: 0x515a66,
   stripeA: 0xe8e8e8, stripeB: 0x3a76c2,
-  foliage: [0x3d6647, 0x4a7a55, 0xcdd8e2],
+  foliage: [0x2e5244, 0x3a6350, 0xcdd8e2],
   fog: 0xe8eef4,
-  skyTop: 0x9fc4e8, fogDensity: 0.0023,
+  // fogDensity halved — iter-1 snow was "a global white fog crushing the whole
+  // value range… a broken render" (critic). Depth now comes from the grade.
+  skyTop: 0x9fc4e8, fogDensity: 0.0012,
   grade: { hue: 0.0, saturation: 0.05 },
+  // critic: snow is pale blue in shadow and warm white in light
+  grade2: {
+    shadowTint: 0x35507a, highlightTint: 0xfff3e0,
+    saturation: 1.04, contrast: 1.10, tiltShift: 0.5,
+  },
+  env: {
+    relief: 5, landform: 'drifts', shoulder: 9,
+    tuftColors: [0x2e5244, 0x3a6350, 0xbfd0e0, 0x9fb8cc],
+    tuftDensity: 14,
+  },
   night: false,
   light: {
-    sun: 0xfff6e8, sunIntensity: 2.1,
-    ambient: 0xdcecff, ambientIntensity: 0.45,
-    hemiSky: 0xf2f8ff, hemiGround: 0x9fb3c8, hemiIntensity: 0.45,
+    sun: 0xffd9b0, sunIntensity: 2.5, // low warm sun raking across the snow
+    ambient: 0x9fc0e8, ambientIntensity: 0.5, // blue sky fill = blue shadows
+    hemiSky: 0xdcecff, hemiGround: 0x7a92b8, hemiIntensity: 0.5,
     rim: 0x8fb8ff, rimIntensity: 0.6,
   },
   trees: ['tree_pineDefaultA', 'tree_pineDefaultB', 'tree_pineRoundA', 'tree_pineTallA'],
@@ -247,12 +303,21 @@ const SNOW: TrackTheme = {
 };
 
 const NIGHT: TrackTheme = {
-  ground: 0x2e3a4a, groundAlt: 0x28333f, road: 0x3a3a44,
+  ground: 0x252f47, groundAlt: 0x1f2839, road: 0x3d3d4d,
   stripeA: 0x9ad4e0, stripeB: 0xd44a8a,
-  foliage: [0x3a8a99, 0x8a3a99, 0x2e6680, 0xb35980],
+  foliage: [0x2e7a88, 0x71337f, 0x255a70, 0x9a4a70],
   fog: 0x16202e,
   skyTop: 0x05070f, fogDensity: 0.0030,
   grade: { hue: 0.0, saturation: 0.04 },
+  grade2: {
+    shadowTint: 0x1a2440, highlightTint: 0xcfe0ff,
+    saturation: 1.08, contrast: 1.12, tiltShift: 0.6,
+  },
+  env: {
+    relief: 4, landform: 'city', shoulder: 9,
+    tuftColors: [0x2e7a88, 0x71337f, 0x3a4a6a, 0x9a4a70],
+    tuftDensity: 22,
+  },
   night: true,
   light: {
     sun: 0x8fa8d9, sunIntensity: 0.85,       // moonlight
