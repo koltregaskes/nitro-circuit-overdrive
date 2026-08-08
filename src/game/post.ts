@@ -36,6 +36,9 @@ export const GradeShader = {
     highlightTint: { value: new THREE.Vector3(1, 1, 1) },
     saturation: { value: 1.0 },
     contrast: { value: 1.0 },
+    // per-theme exposure: bright biomes (snow) stack sun+ambient past 1.0 and
+    // ACES flattens the whole field to white — albedo tweaks can't fix that
+    exposure: { value: 1.0 },
     // multiplicative vignette — replaces three's VignetteShader, whose
     // mix-toward-(1-darkness) target goes NEGATIVE for darkness > 1 and hue-shifts
     // dark scenes (measured: navy corners turned olive). Multiplying toward black
@@ -51,6 +54,7 @@ uniform vec3 shadowTint;
 uniform vec3 highlightTint;
 uniform float saturation;
 uniform float contrast;
+uniform float exposure;
 uniform float vignette;
 
 varying vec2 vUv;
@@ -59,7 +63,7 @@ const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722); // rec709
 
 void main() {
   vec4 texel = texture2D(tDiffuse, vUv);
-  vec3 color = texel.rgb;
+  vec3 color = texel.rgb * exposure;
 
   // 1. split tone — darks take the shadow tint, brights the highlight tint
   float luma = dot(color, LUMA);

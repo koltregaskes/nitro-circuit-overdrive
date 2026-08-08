@@ -226,6 +226,7 @@ class Game {
       grading.uniforms.highlightTint.value.copy(tint(grade2.highlightTint));
       grading.uniforms.saturation.value = grade2.saturation;
       grading.uniforms.contrast.value = grade2.contrast;
+      grading.uniforms.exposure.value = grade2.exposure ?? 1;
       this.composer.addPass(grading);
 
       // miniature/diorama defocus above and below the racing band — the single

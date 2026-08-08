@@ -490,6 +490,18 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
     startPositions.push({ pos, heading });
   }
 
+  // The studio env map (added for car paint) floods every StandardMaterial with
+  // ~1 unit of white IBL — it's why snow blew to white regardless of albedo or
+  // exposure. Terrain wants sun + sky only; cars (outside this group) keep it.
+  group.traverse((o) => {
+    const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[] | undefined;
+    for (const mat of Array.isArray(m) ? m : m ? [m] : []) {
+      if ((mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
+        mat.envMapIntensity = 0.18;
+      }
+    }
+  });
+
   group.userData.cached = true;
   const built: BuiltTrack = { def, group, samples, totalLength, segLength, halfWidth, minimap, startPositions, obstacles };
   trackCache.set(cacheKey, built);

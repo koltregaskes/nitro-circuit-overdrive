@@ -166,6 +166,7 @@ export interface ThemeGrade {
   saturation: number;    // 1 = neutral
   contrast: number;      // 1 = neutral, pivot 0.5
   tiltShift: number;     // 0..1 miniature-diorama blur strength
+  exposure?: number;     // pre-grade multiplier (default 1) — pulls blown biomes down
 }
 
 /** Terrain + ground-cover parameters (gauntlet iteration 1). */
@@ -273,29 +274,32 @@ const DESERT: TrackTheme = {
 };
 
 const SNOW: TrackTheme = {
-  ground: 0xe4ebf2, groundAlt: 0xd3dfeb, road: 0x515a66,
+  // blue-grey field, NOT white: "snow is pale blue in shadow and warm white in
+  // light" (critic) — value headroom lets sunlit crests and markings pop
+  ground: 0xbfcfe2, groundAlt: 0xafc0d6, road: 0x515a66,
   stripeA: 0xe8e8e8, stripeB: 0x3a76c2,
   foliage: [0x2e5244, 0x3a6350, 0xcdd8e2],
-  fog: 0xe8eef4,
-  // fogDensity halved — iter-1 snow was "a global white fog crushing the whole
-  // value range… a broken render" (critic). Depth now comes from the grade.
-  skyTop: 0x9fc4e8, fogDensity: 0.0012,
+  fog: 0xdde7f2,
+  skyTop: 0x9fc4e8, fogDensity: 0.0007,
   grade: { hue: 0.0, saturation: 0.05 },
   // critic: snow is pale blue in shadow and warm white in light
   grade2: {
     shadowTint: 0x35507a, highlightTint: 0xfff3e0,
     saturation: 1.04, contrast: 1.10, tiltShift: 0.5,
+    exposure: 0.72, // white-albedo biome: light stack must be pulled hard
   },
+  // white fields need dark punctuation (ref: conifer masses against snow) —
+  // dense pine-green scatter is what gives the biome its value range
   env: {
     relief: 5, landform: 'drifts', shoulder: 9,
-    tuftColors: [0x2e5244, 0x3a6350, 0xbfd0e0, 0x9fb8cc],
-    tuftDensity: 14,
+    tuftColors: [0x24493c, 0x2e5244, 0x3a6350, 0x54708c],
+    tuftDensity: 34,
   },
   night: false,
   light: {
-    sun: 0xffd9b0, sunIntensity: 2.5, // low warm sun raking across the snow
-    ambient: 0x9fc0e8, ambientIntensity: 0.5, // blue sky fill = blue shadows
-    hemiSky: 0xdcecff, hemiGround: 0x7a92b8, hemiIntensity: 0.5,
+    sun: 0xffd9b0, sunIntensity: 2.7, // low warm sun raking across the snow
+    ambient: 0x9fc0e8, ambientIntensity: 0.40, // blue sky fill = blue shadows
+    hemiSky: 0xdcecff, hemiGround: 0x7a92b8, hemiIntensity: 0.42,
     rim: 0x8fb8ff, rimIntensity: 0.6,
   },
   trees: ['tree_pineDefaultA', 'tree_pineDefaultB', 'tree_pineRoundA', 'tree_pineTallA'],
