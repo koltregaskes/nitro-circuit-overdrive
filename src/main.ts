@@ -238,7 +238,7 @@ class Game {
         this.race?.track.def.theme.fog ?? 0xffffff, THREE.LinearSRGBColorSpace
       );
       grading.uniforms.hazeColor.value.set(fogC.r, fogC.g, fogC.b);
-      grading.uniforms.haze.value = this.race ? 0.22 : 0;
+      grading.uniforms.haze.value = this.race ? (grade2.haze ?? 0.22) : 0;
       this.composer.addPass(grading);
 
       // miniature/diorama defocus above and below the racing band — the single

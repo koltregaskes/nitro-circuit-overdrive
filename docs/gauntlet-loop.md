@@ -88,3 +88,25 @@ iterations. Kol is the final judge above the critic.
 **Observed inter-critic variance is ±0.5–1.0** — single-round scores are noisy; trust
 only findings that repeat across rounds, and require the exit bar over two
 consecutive rounds (already in the protocol).
+
+## Protocol v2 (after iteration 4)
+
+Round 4 exposed a measurement failure: the critic recommended five systemic fixes of
+which four were already implemented and visible in the frames (raking sun with long
+shadows, terrain displacement, verge scatter belts, full post stack). Diagnosis:
+
+1. **Vision-resolution blindness** — critics view downscaled frames; effects that
+   live at 2–6 px (shadow direction at this zoom, grade subtlety, small scatter)
+   do not register. *Too subtle to see at model resolution = absent.*
+2. **Pixel-density anchoring** — a top-down camera's 40 px cars can never match a
+   chase-cam's 600 px hero car for authored detail per pixel. The blind A/B against
+   beauty stills saturates around 3.5 regardless of real progress.
+
+Round 5+ therefore:
+- Critic receives BOTH the wide gameplay frame AND a 2× zoom crop per theme, so
+  detail is judged at comparable pixel density to the reference stills.
+- Critic receives the PREVIOUS iteration's frames for progression scoring
+  (did the delta land?) alongside the refs for the absolute bar.
+- Critic is given the list of implemented systems and asked which REGISTER in the
+  frames — turning "add X" advice into tuning signal ("X exists but doesn't read").
+- Repeated-signal rule stays: only act on findings that survive two rounds.

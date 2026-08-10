@@ -167,6 +167,7 @@ export interface ThemeGrade {
   contrast: number;      // 1 = neutral, pivot 0.5
   tiltShift: number;     // 0..1 miniature-diorama blur strength
   exposure?: number;     // pre-grade multiplier (default 1) — pulls blown biomes down
+  haze?: number;         // aerial-haze strength (default 0.22); bright biomes want less
 }
 
 /** Terrain + ground-cover parameters (gauntlet iteration 1). */
@@ -291,6 +292,7 @@ const SNOW: TrackTheme = {
     shadowTint: 0x35507a, highlightTint: 0xfff3e0,
     saturation: 1.04, contrast: 1.10, tiltShift: 0.5,
     exposure: 0.72, // white-albedo biome: light stack must be pulled hard
+    haze: 0.10,     // white haze on a white field only feeds the value crush
   },
   // white fields need dark punctuation (ref: conifer masses against snow) —
   // dense pine-green scatter is what gives the biome its value range

@@ -508,7 +508,8 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
       const cc = new THREE.Color();
       let idx = 0;
       for (const spot of spots) {
-        // barrier: a run of low white wall along the corner
+        // barrier: a run of low white wall along the corner — SOLID, so a car
+        // that overshoots hits the wall instead of ghosting through spectators
         for (let o = -10; o <= 10; o += 2) {
           const bs = samples[(spot.i + o + n) % n];
           const bp = bs.pos.clone().addScaledVector(bs.normal, spot.side * (halfWidth + 3.4));
@@ -516,6 +517,7 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
           seg.rotateY(Math.atan2(bs.tangent.x, bs.tangent.z));
           seg.translate(bp.x, 0.42, bp.z);
           barrierGeos.push(seg);
+          if (o % 4 === 0) obstacles.push({ pos: bp.clone().setY(0), radius: 1.2 });
         }
         // spectators: clustered, jittered, leaning
         for (let k = 0; k < 70 && idx < total; k++) {
