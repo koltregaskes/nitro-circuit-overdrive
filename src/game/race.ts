@@ -1067,6 +1067,21 @@ export class Race {
       }
     }
 
+    // motion evidence — every car kicks biome dust at speed ("no evidence that
+    // anything is moving; parked toys" — critic). Budget-capped: effects are
+    // per-mesh draw calls, so emission stops when the pool is busy.
+    const themeDust = this.track.def.theme.env.dust;
+    if (!r.finished && r.crash <= 0 && this.phase === 'racing') {
+      const sp = Math.abs(r.speed);
+      if (sp > 16 && this.effects.length < 70 &&
+          Math.random() < Math.min(0.45, sp / 110 + Math.abs(slip) * 0.8)) {
+        const back = new THREE.Vector3(Math.sin(r.heading), 0, Math.cos(r.heading)).multiplyScalar(-2.0);
+        const lat = new THREE.Vector3(Math.cos(r.heading), 0, -Math.sin(r.heading))
+          .multiplyScalar((Math.random() - 0.5) * 1.6);
+        this.spawnDust(r.pos.clone().add(back).add(lat), themeDust, 0.35 + Math.abs(slip) * 0.9 + sp / 120);
+      }
+    }
+
     // juice (player only, for performance): skid marks when drifting, dust off-road/boosting
     if (r.cfg.isPlayer && !r.finished) {
       const speed = Math.abs(r.speed);
@@ -1075,7 +1090,7 @@ export class Race {
       }
       if (speed > 10 && r.offTrack && Math.random() < 0.6) {
         const back = new THREE.Vector3(Math.sin(r.heading), 0, Math.cos(r.heading)).multiplyScalar(-1.8);
-        this.spawnDust(r.pos.clone().add(back), 0xc8b98a, 0.8);
+        this.spawnDust(r.pos.clone().add(back), themeDust, 0.8);
       }
       // boost trail: hot exhaust plume behind the nitro flame, two puffs per frame
       // so it reads as a continuous streak at speed rather than dashes

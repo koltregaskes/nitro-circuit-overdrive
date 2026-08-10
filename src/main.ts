@@ -151,6 +151,12 @@ class Game {
     window.addEventListener('pointerdown', () => this.audio.unlock(), { once: true });
     this.onResize();
     this.toState('menu');
+    // ?goto=garage etc — deterministic screen capture for the gauntlet shot list
+    const goto = new URLSearchParams(location.search).get('goto');
+    if (goto === 'garage' || goto === 'settings' || goto === 'modes' ||
+        goto === 'leaderboards' || goto === 'tournament') {
+      this.toState(goto);
+    }
     // start fetching the 44 GLBs during the menu so the first race isn't blocked on them
     void ensureModelsLoaded();
     requestAnimationFrame(() => this.loop());

@@ -105,6 +105,55 @@ function shade(color: number, f: number): number {
   return c.getHex();
 }
 
+// Fictional sponsor boards — canvas-generated, cached, shared across tracks.
+let sponsorTexCache: THREE.CanvasTexture[] | null = null;
+function sponsorTextures(): THREE.CanvasTexture[] {
+  if (sponsorTexCache) return sponsorTexCache;
+  const brands: [string, string, string][] = [
+    ['NITRO', '#16181d', '#ff2975'],
+    ['VEX RACING', '#101218', '#2de2e6'],
+    ['TURBO+', '#1a1a24', '#ffc83d'],
+    ['KOLT', '#d62828', '#f2f2f2'],
+    ['APEX FUEL', '#12161f', '#8ede2a'],
+    ['OVERDRIVE', '#5a2d9e', '#ffffff'],
+  ];
+  sponsorTexCache = brands.map(([name, bg, fg]) => {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 72;
+    const ctx = c.getContext('2d')!;
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, 256, 72);
+    ctx.fillStyle = fg;
+    ctx.fillRect(0, 0, 256, 6);
+    ctx.fillRect(0, 66, 256, 6);
+    ctx.font = 'italic 900 34px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(name, 128, 38);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  });
+  return sponsorTexCache;
+}
+
+// Checkered start-gantry panel, cached.
+let checkerTexCache: THREE.CanvasTexture | null = null;
+function checkerTexture(): THREE.CanvasTexture {
+  if (checkerTexCache) return checkerTexCache;
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 32;
+  const ctx = c.getContext('2d')!;
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 16; x++) {
+      ctx.fillStyle = (x + y) % 2 === 0 ? '#f2f2f2' : '#16181d';
+      ctx.fillRect(x * 8, y * 8, 8, 8);
+    }
+  }
+  checkerTexCache = new THREE.CanvasTexture(c);
+  return checkerTexCache;
+}
+
 // Lit-window grid for the night-city towers: mostly dark, a scatter of warm and
 // neon panes. One shared texture; each tower face stretches it, which at this
 // art scale reads as intended stylisation rather than tiling error.
@@ -376,6 +425,158 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
     tufts.instanceMatrix.needsUpdate = true;
     if (tufts.instanceColor) tufts.instanceColor.needsUpdate = true;
     group.add(tufts);
+  }
+
+  // ---- race-event dressing: billboards, crowds, barriers, start gantry ----
+  // ("branded trackside dressing… B never shows an empty verge" — critic)
+  {
+    // signed turn direction at each sample → billboards/crowds sit on corner OUTSIDES
+    const K = 8;
+    const turnSign = (i: number): number => {
+      const a = samples[i].tangent, b = samples[(i + K) % n].tangent;
+      return Math.sign(a.z * b.x - a.x * b.z) || 1;
+    };
+    // corner picks, spaced apart, strongest curvature first
+    const corners: { i: number; side: number }[] = [];
+    const idxByCurv = samples.map((s, i) => ({ i, c: s.curvature }))
+      .sort((a, b) => b.c - a.c);
+    for (const { i, c } of idxByCurv) {
+      if (c < 0.018) break;
+      if (corners.some((k) => Math.min(Math.abs(k.i - i), n - Math.abs(k.i - i)) < 45)) continue;
+      corners.push({ i, side: turnSign(i) });
+      if (corners.length >= 9) break;
+    }
+
+    // billboards: panels merged per brand (one draw call per brand used) + one post mesh
+    const texs = sponsorTextures();
+    const panelsByBrand = new Map<number, THREE.BufferGeometry[]>();
+    const postGeos: THREE.BufferGeometry[] = [];
+    const crowdSpots: { i: number; side: number }[] = [];
+    corners.forEach((corner, ci) => {
+      if (ci % 2 === 1) { crowdSpots.push(corner); return; } // alternate: crowd spot
+      const s = samples[corner.i];
+      const lat = halfWidth + 5.5 + rng() * 2;
+      const base = s.pos.clone().addScaledVector(s.normal, corner.side * lat);
+      const yaw = Math.atan2(s.normal.x, s.normal.z) + (corner.side > 0 ? Math.PI : 0);
+      const brand = Math.floor(rng() * texs.length);
+      const panel = new THREE.PlaneGeometry(7, 2.0);
+      // rake the board back ~32° — a vertical panel is edge-on to the top-down
+      // camera; leaned back it reads like a stadium hoarding
+      panel.rotateX(-0.56);
+      panel.rotateY(yaw);
+      panel.translate(base.x, 2.4, base.z);
+      let arr = panelsByBrand.get(brand);
+      if (!arr) { arr = []; panelsByBrand.set(brand, arr); }
+      arr.push(panel);
+      for (const off of [-2.9, 2.9]) {
+        const post = new THREE.BoxGeometry(0.22, 2.6, 0.22);
+        const px = base.x + Math.cos(yaw) * off, pz = base.z - Math.sin(yaw) * off;
+        post.translate(px, 1.3, pz);
+        postGeos.push(post);
+      }
+    });
+    for (const [brand, geos] of panelsByBrand) {
+      const merged = mergeGeometries(geos)!;
+      const m = new THREE.Mesh(merged, new THREE.MeshLambertMaterial({
+        map: texs[brand], side: THREE.DoubleSide,
+      }));
+      m.castShadow = true;
+      group.add(m);
+    }
+    if (postGeos.length) {
+      const posts = new THREE.Mesh(mergeGeometries(postGeos)!,
+        new THREE.MeshStandardMaterial({ color: 0x2a2e36, flatShading: true, roughness: 0.9 }));
+      posts.castShadow = true;
+      group.add(posts);
+    }
+
+    // crowds: colourful low-poly spectator blocks behind a white barrier
+    if (crowdSpots.length) {
+      const kit = [0xd62828, 0x2d77d6, 0xffc83d, 0xe8e8e8, 0x35a84a, 0xff2975, 0x8526c9, 0x2de2e6];
+      const bodyGeo = new THREE.BoxGeometry(0.55, 1, 0.55);
+      bodyGeo.translate(0, 0.5, 0);
+      const spots = crowdSpots.slice(0, 3);
+      const total = spots.length * 70;
+      const crowd = new THREE.InstancedMesh(
+        bodyGeo,
+        new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.95 }),
+        total
+      );
+      crowd.frustumCulled = false;
+      const barrierGeos: THREE.BufferGeometry[] = [];
+      const d = new THREE.Object3D();
+      const cc = new THREE.Color();
+      let idx = 0;
+      for (const spot of spots) {
+        // barrier: a run of low white wall along the corner
+        for (let o = -10; o <= 10; o += 2) {
+          const bs = samples[(spot.i + o + n) % n];
+          const bp = bs.pos.clone().addScaledVector(bs.normal, spot.side * (halfWidth + 3.4));
+          const seg = new THREE.BoxGeometry(2.0, 0.85, 0.22);
+          seg.rotateY(Math.atan2(bs.tangent.x, bs.tangent.z));
+          seg.translate(bp.x, 0.42, bp.z);
+          barrierGeos.push(seg);
+        }
+        // spectators: clustered, jittered, leaning
+        for (let k = 0; k < 70 && idx < total; k++) {
+          const o = Math.floor((rng() - 0.5) * 22);
+          const bs = samples[(spot.i + o + n) % n];
+          const lat = halfWidth + 4.4 + rng() * 3.4;
+          const px = bs.pos.x + bs.normal.x * spot.side * lat + (rng() - 0.5) * 1.2;
+          const pz = bs.pos.z + bs.normal.z * spot.side * lat + (rng() - 0.5) * 1.2;
+          d.position.set(px, groundHeightAt(px, pz), pz);
+          d.rotation.set(0, rng() * Math.PI * 2, (rng() - 0.5) * 0.1);
+          d.scale.set(1, 0.85 + rng() * 0.5, 1);
+          d.updateMatrix();
+          crowd.setMatrixAt(idx, d.matrix);
+          cc.setHex(kit[Math.floor(rng() * kit.length)]).multiplyScalar(0.85 + rng() * 0.3);
+          crowd.setColorAt(idx, cc);
+          idx++;
+        }
+      }
+      crowd.count = idx;
+      crowd.instanceMatrix.needsUpdate = true;
+      if (crowd.instanceColor) crowd.instanceColor.needsUpdate = true;
+      group.add(crowd);
+      if (barrierGeos.length) {
+        const barrier = new THREE.Mesh(mergeGeometries(barrierGeos)!,
+          new THREE.MeshStandardMaterial({ color: 0xe8e8e8, flatShading: true, roughness: 0.8 }));
+        barrier.castShadow = true;
+        group.add(barrier);
+      }
+    }
+
+    // start gantry: posts + checkered beam over the start line
+    {
+      const s0 = samples[0];
+      const yaw = Math.atan2(s0.normal.x, s0.normal.z);
+      const structMat = new THREE.MeshStandardMaterial({ color: 0x2a2e36, flatShading: true, roughness: 0.9 });
+      const postGeo: THREE.BufferGeometry[] = [];
+      for (const side of [1, -1]) {
+        const p = s0.pos.clone().addScaledVector(s0.normal, side * (halfWidth + 1.8));
+        const g1 = new THREE.BoxGeometry(0.5, 7.2, 0.5);
+        g1.translate(p.x, 3.6, p.z);
+        postGeo.push(g1);
+      }
+      const beamLen = halfWidth * 2 + 5;
+      const beam = new THREE.BoxGeometry(0.6, 1.4, beamLen);
+      beam.rotateY(yaw);
+      beam.translate(s0.pos.x, 6.9, s0.pos.z);
+      const structure = new THREE.Mesh(mergeGeometries([...postGeo, beam])!, structMat);
+      structure.castShadow = true;
+      group.add(structure);
+      const checkerMat = new THREE.MeshBasicMaterial({ map: checkerTexture(), side: THREE.DoubleSide });
+      const panel = new THREE.PlaneGeometry(beamLen - 1, 1.1);
+      panel.rotateY(yaw + Math.PI / 2);
+      panel.translate(s0.pos.x, 6.9, s0.pos.z);
+      group.add(new THREE.Mesh(panel, checkerMat));
+      // top face too — the overhead camera sees the beam's roof, not its side
+      const roof = new THREE.PlaneGeometry(1.2, beamLen - 1);
+      roof.rotateX(-Math.PI / 2);
+      roof.rotateY(yaw + Math.PI / 2);
+      roof.translate(s0.pos.x, 7.62, s0.pos.z);
+      group.add(new THREE.Mesh(roof, checkerMat));
+    }
   }
 
   // ---- landforms: silhouette interest beyond the play field ----

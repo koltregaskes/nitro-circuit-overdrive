@@ -179,6 +179,8 @@ export interface ThemeEnvironment {
   /** Pull GLB foliage materials toward a harmony colour (fixes e.g. mint palms
    * clashing with ochre sand — GLB models carry their own baked colours). */
   foliageTint?: { color: number; amount: number };
+  /** Kicked-up dust/spray colour — biome-specific motion evidence. */
+  dust: number;
 }
 
 export interface TrackTheme {
@@ -231,6 +233,7 @@ const FOREST: TrackTheme = {
     relief: 6, landform: 'hills', shoulder: 11,
     tuftColors: [0x67974a, 0x7fae54, 0x4f7d38, 0xd98a3a, 0xc9522e],
     tuftDensity: 34,
+    dust: 0xcdbf9a,
   },
   night: false,
   light: {
@@ -261,6 +264,7 @@ const DESERT: TrackTheme = {
     tuftColors: [0xb59a4e, 0xc9ae62, 0x8a8a4a, 0xa07a3e],
     tuftDensity: 20,
     foliageTint: { color: 0x7d8a4a, amount: 0.75 },
+    dust: 0xdec08a,
   },
   night: false,
   light: {
@@ -294,6 +298,7 @@ const SNOW: TrackTheme = {
     relief: 5, landform: 'drifts', shoulder: 9,
     tuftColors: [0x24493c, 0x2e5244, 0x3a6350, 0x54708c],
     tuftDensity: 34,
+    dust: 0xf2f7fc,
   },
   night: false,
   light: {
@@ -321,6 +326,7 @@ const NIGHT: TrackTheme = {
     relief: 4, landform: 'city', shoulder: 9,
     tuftColors: [0x2e7a88, 0x71337f, 0x3a4a6a, 0x9a4a70],
     tuftDensity: 22,
+    dust: 0x46558a,
   },
   night: true,
   light: {
