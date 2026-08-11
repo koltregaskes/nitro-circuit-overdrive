@@ -253,8 +253,8 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
   // stays 2D (cars at y=0) while everything beyond the shoulder gains relief.
   const noise = makeNoise2D(rng);
   const relief = theme.env.relief;
-  const corridorInner = halfWidth + theme.env.shoulder + 4;
-  const corridorOuter = corridorInner + 40;
+  const corridorInner = halfWidth + theme.env.shoulder + 2;
+  const corridorOuter = corridorInner + 26; // tighter ramp = relief starts near the road
   // coarse nearest-centre-line distance — every 3rd sample is plenty for a mask
   const corridorDist = (x: number, z: number): number => {
     let d2 = Infinity;
@@ -272,8 +272,12 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
   /** Terrain height at a world point — shared by the mesh, scatter and landforms. */
   const groundHeightAt = (x: number, z: number): number => {
     if (relief <= 0) return 0;
-    const h = (noise(x / 90, z / 90) - 0.5) * 2 * relief;
-    return h * smoothstep(corridorInner, corridorOuter, corridorDist(x, z));
+    // two scales: broad landform + a tighter ridge octave. A single 90-unit
+    // octave at low amplitude was invisible under the perspective camera —
+    // the ground read as a billiard table right up to the horizon.
+    const broad = (noise(x / 62, z / 62) - 0.5) * 2 * relief;
+    const fine = (noise(x / 21 + 400, z / 21 + 400) - 0.5) * 2 * relief * 0.42;
+    return (broad + fine) * smoothstep(corridorInner, corridorOuter, corridorDist(x, z));
   };
 
   const GROUND_SEGS = 140;

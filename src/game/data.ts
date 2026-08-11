@@ -231,7 +231,7 @@ const FOREST: TrackTheme = {
     saturation: 1.08, contrast: 1.11, tiltShift: 0.55,
   },
   env: {
-    relief: 6, landform: 'hills', shoulder: 11,
+    relief: 13, landform: 'hills', shoulder: 11,
     tuftColors: [0x67974a, 0x7fae54, 0x4f7d38, 0xd98a3a, 0xc9522e],
     tuftDensity: 34,
     dust: 0xcdbf9a,
@@ -261,7 +261,7 @@ const DESERT: TrackTheme = {
     saturation: 1.08, contrast: 1.11, tiltShift: 0.5,
   },
   env: {
-    relief: 9, landform: 'dunes', shoulder: 9,
+    relief: 16, landform: 'dunes', shoulder: 9,
     tuftColors: [0xb59a4e, 0xc9ae62, 0x8a8a4a, 0xa07a3e],
     tuftDensity: 20,
     foliageTint: { color: 0x7d8a4a, amount: 0.75 },
@@ -297,7 +297,7 @@ const SNOW: TrackTheme = {
   // white fields need dark punctuation (ref: conifer masses against snow) —
   // dense pine-green scatter is what gives the biome its value range
   env: {
-    relief: 5, landform: 'drifts', shoulder: 9,
+    relief: 11, landform: 'drifts', shoulder: 9,
     tuftColors: [0x24493c, 0x2e5244, 0x3a6350, 0x54708c],
     tuftDensity: 34,
     dust: 0xf2f7fc,
@@ -325,7 +325,7 @@ const NIGHT: TrackTheme = {
     saturation: 1.08, contrast: 1.12, tiltShift: 0.6,
   },
   env: {
-    relief: 4, landform: 'city', shoulder: 9,
+    relief: 7, landform: 'city', shoulder: 9,
     tuftColors: [0x2e7a88, 0x71337f, 0x3a4a6a, 0x9a4a70],
     tuftDensity: 22,
     dust: 0x46558a,
