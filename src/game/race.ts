@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { CarStats } from './data';
-import { BuiltTrack, Obstacle, nearestSample } from './track';
+import { BuiltTrack, Obstacle, nearestSample, windTime } from './track';
 import { buildAnimalMesh, buildCarMesh, buildLorryMesh, buildMineMesh, buildMissileMesh } from './carmesh';
 import { GhostLap } from './save';
 import { DEBRIS_MODELS, WheelRig, buildCarFromModel, cloneScaled } from './models';
@@ -842,6 +842,8 @@ export class Race {
       if (Math.random() < 0.55 || this.lorryDone) this.eventAnimal();
       else this.eventLorry();
     }
+    // wind clock — storms blow harder, so vegetation reacts to the weather
+    windTime.value += dt * (this.weather === 'storm' ? 2.4 : this.weather === 'rain' ? 1.5 : 1);
     this.updateAnimals(dt);
     this.updateLorry(dt);
     if (this.weather !== 'clear') this.updateWeather(dt);

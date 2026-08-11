@@ -210,6 +210,44 @@ const trackCache = new Map<string, BuiltTrack>();
 // guards against double-tinting a cached GLB foliage material on track rebuilds
 const tintedFoliage = new Set<string>();
 
+/**
+ * Shared wind clock. Vegetation sways in the VERTEX SHADER — with 8k+ instances,
+ * updating matrices on the CPU each frame would cost more than the rest of the
+ * scene combined. Race.update() advances this one uniform; every swaying
+ * material reads it.
+ */
+export const windTime = { value: 0 };
+
+/** Add height-weighted sway to any instanced foliage material. */
+function makeWindy(mat: THREE.Material, strength = 1): void {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uWindTime = windTime;
+    shader.uniforms.uWindStrength = { value: strength };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        uniform float uWindTime;
+        uniform float uWindStrength;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        {
+          // instance world position seeds the phase so neighbours don't sway in
+          // lockstep; transformed.y weights it so bases stay planted
+          #ifdef USE_INSTANCING
+            float wx = instanceMatrix[3].x;
+            float wz = instanceMatrix[3].z;
+          #else
+            float wx = 0.0; float wz = 0.0;
+          #endif
+          float phase = wx * 0.09 + wz * 0.07;
+          float gust = sin(uWindTime * 1.6 + phase) * 0.6
+                     + sin(uWindTime * 3.7 + phase * 1.7) * 0.25;
+          float h = max(transformed.y, 0.0);
+          transformed.x += gust * h * 0.16 * uWindStrength;
+          transformed.z += gust * h * 0.09 * uWindStrength;
+        }`);
+  };
+  mat.needsUpdate = true;
+}
+
 export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
   const cacheKey = def.id + ':' + seed;
   const hit = trackCache.get(cacheKey);
@@ -421,6 +459,7 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
     // lit + flat-shaded: cone facets face partly upward, so the top-down sun
     // shades them properly (the earlier vertical quads rendered as dark debris)
     const tuftMat = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.9 });
+    makeWindy(tuftMat, 1);
     const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, places.length);
     tufts.frustumCulled = false;
     tufts.castShadow = false;
@@ -1110,6 +1149,8 @@ function addDecor(
         const m = part.material as THREE.MeshStandardMaterial;
         if (m.color) m.color.lerp(new THREE.Color(tintSpec.color), tintSpec.amount);
       }
+      // trees sway too, but gently — a whipping canopy reads as broken
+      if (theme.trees.includes(name)) makeWindy(part.material, 0.32);
       const inst = new THREE.InstancedMesh(part.geometry, part.material, list.length);
       inst.castShadow = true;
       inst.receiveShadow = true;

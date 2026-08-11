@@ -89,6 +89,24 @@ iterations. Kol is the final judge above the critic.
 only findings that repeat across rounds, and require the exit bar over two
 consecutive rounds (already in the protocol).
 
+## Iteration 5 — the root cause the critic loop never found
+
+Kol's one-line note ("feels flat, needs to be more 3D, feels like 2019") beat five
+rounds of automated critique. The camera was **orthographic** at a near-vertical
+65°: ortho projection is flat *by definition* (no foreshortening, no parallax) and
+at that angle you only ever saw the tops of things — so every silhouette built in
+iterations 1–4 (billboards, crowds, towers, gantry) was invisible by construction.
+
+**Lesson for the protocol:** critics judged *art* and never questioned *geometry*.
+Add a standing question to every critic round: "is anything about the projection,
+camera or framing preventing this scene from reading?" — and always show a human
+the frames. A domain expert's glance outperformed the loop.
+
+Shipped after the fix: perspective chase rig with speed pullback and heading lead ·
+harmonic engine audio with a real gearbox · two-octave terrain relief · dynamic
+weather (rain/storm, wet roads, spray, lightning, grip loss) · GPU vertex-shader
+wind on all vegetation.
+
 ## Protocol v2 (after iteration 4)
 
 Round 4 exposed a measurement failure: the critic recommended five systemic fixes of
