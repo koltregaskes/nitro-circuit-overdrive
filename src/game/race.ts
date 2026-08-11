@@ -345,10 +345,15 @@ export class Race {
 
     configs.forEach((cfg, i) => {
       const slot = track.startPositions[i % track.startPositions.length];
+      // GLB models stay primary: measured side-by-side under the perspective
+      // camera, the hand-authored Kenney silhouettes beat the procedural body
+      // (an extruded profile reads as a loaf at this scale). The procedural car
+      // is the fallback and has been upgraded to match — clearcoat paint, glass,
+      // spoked rims, emissive lamps.
       let mesh = cfg.model ? buildCarFromModel(cfg.model, cfg.color, cfg.carNum) : null;
       if (!mesh) {
         mesh = buildCarMesh(cfg.color, cfg.accent, cfg.carNum);
-        mesh.scale.setScalar(1.25); // visual readability from the top-down camera
+        mesh.scale.setScalar(1.15);
       }
       mesh.position.copy(slot.pos);
       // YXZ: heading (Y) first, then suspension pitch (X) and drift lean (Z) resolve
