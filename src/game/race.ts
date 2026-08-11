@@ -157,9 +157,12 @@ export interface HudState {
 export type RacePhase = 'countdown' | 'racing' | 'finished';
 export type RaceMode = 'race' | 'timetrial' | 'elimination';
 
+export type Weather = 'clear' | 'rain' | 'storm';
+
 export interface RaceOptions {
   weapons?: boolean;
   mode?: RaceMode;
+  weather?: Weather;
   /** AI cornering grip — difficulty scales this (see DIFFICULTY_TUNING). */
   latGrip?: number;
   /** Ghost lap to replay alongside the player (Time Trial only). */
@@ -277,6 +280,16 @@ export class Race {
   private ghostStride = GHOST_STRIDE;
   private eliminated = new Set<string>();
   private lastEliminationLap = 0;
+  // ---- weather ----
+  private weather: Weather = 'clear';
+  private rain: THREE.InstancedMesh | null = null;
+  private rainSeed: Float32Array | null = null;
+  private rainDummy = new THREE.Object3D();
+  private rainT = 0;
+  private boltT = 0;
+  private nextBolt = 4 + Math.random() * 8;
+  private ambientLight!: THREE.AmbientLight;
+  private wetRestore: { mat: THREE.MeshStandardMaterial; rough: number; env: number; col: number }[] = [];
 
   constructor(
     track: BuiltTrack,
@@ -286,6 +299,7 @@ export class Race {
     opts: RaceOptions = {}
   ) {
     this.weapons = opts.weapons ?? true;
+    this.weather = opts.weather ?? 'clear';
     this.mode = opts.mode ?? 'race';
     this.latGrip = opts.latGrip ?? 30;
     this.laps = opts.laps ?? track.def.laps;
@@ -309,6 +323,7 @@ export class Race {
     const L = theme.light;
     const ambient = new THREE.AmbientLight(L.ambient, L.ambientIntensity);
     this.scene.add(ambient);
+    this.ambientLight = ambient;
     const hemi = new THREE.HemisphereLight(L.hemiSky, L.hemiGround, L.hemiIntensity);
     this.scene.add(hemi);
     // rim/back light opposite the sun: cool edge separation on car roofs and canopies
@@ -459,6 +474,8 @@ export class Race {
       this.scene.add(gm);
     }
 
+    if (this.weather !== 'clear') this.setupWeather();
+
     // Time Trial is a clean hot-lap sandbox — no standing hazards
     const n = track.samples.length;
     if (this.mode !== 'timetrial') {
@@ -467,6 +484,119 @@ export class Race {
         this.spawnOil(idx, (Math.random() - 0.5) * track.halfWidth * 1.1);
       }
     }
+  }
+
+  // ---------- weather ----------
+  /**
+   * Rain is a fixed instanced volume that RIDES THE CAMERA — 1400 streaks
+   * recycled inside a box around the player rather than a world-space emitter,
+   * so density is constant and cost is one draw call regardless of track size.
+   */
+  private setupWeather(): void {
+    const storm = this.weather === 'storm';
+    const COUNT = storm ? 2000 : 1300;
+    const geo = new THREE.PlaneGeometry(0.045, 1.5);
+    const mat = new THREE.MeshBasicMaterial({
+      color: storm ? 0xc9d8ea : 0xd8e6f2,
+      transparent: true, opacity: storm ? 0.5 : 0.36, depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const rain = new THREE.InstancedMesh(geo, mat, COUNT);
+    rain.frustumCulled = false;
+    rain.renderOrder = 3;
+    // x, y, z offsets + per-drop fall speed and length scale
+    const seed = new Float32Array(COUNT * 5);
+    for (let i = 0; i < COUNT; i++) {
+      seed[i * 5] = (Math.random() - 0.5) * 150;
+      seed[i * 5 + 1] = Math.random() * 70;
+      seed[i * 5 + 2] = (Math.random() - 0.5) * 150;
+      seed[i * 5 + 3] = 52 + Math.random() * 34;
+      seed[i * 5 + 4] = 0.7 + Math.random() * 1.1;
+    }
+    this.rainSeed = seed;
+    this.rain = rain;
+    this.scene.add(rain);
+
+    // wet road: darker, smoother, far more reflective. The track group is CACHED
+    // and shared between races, so originals are stashed and restored on dispose.
+    this.track.group.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+      if (!m || !(m as THREE.MeshStandardMaterial).isMeshStandardMaterial) return;
+      if (!o.userData.road && !(o as THREE.Mesh).geometry?.userData?.road) return;
+      this.wetRestore.push({ mat: m, rough: m.roughness, env: m.envMapIntensity, col: m.color.getHex() });
+      // NOT a big envMapIntensity boost: the shared RoomEnvironment probe is a
+      // bright white studio, so cranking it floods tarmac to white (the same IBL
+      // trap that blew out snow). Wet road = DARK and smooth, with only a hint
+      // of probe reflection.
+      m.roughness = 0.24;
+      m.envMapIntensity = 0.30;
+      m.color.multiplyScalar(0.30);
+      m.needsUpdate = true;
+    });
+
+    // storm clouds swallow the sun and lift the ambient to a flat overcast
+    const L = this.track.def.theme.light;
+    this.sun.intensity = L.sunIntensity * (storm ? 0.30 : 0.52);
+    this.sun.color.setHex(storm ? 0x9fb0c8 : 0xc8d4e4);
+    this.ambientLight.intensity = L.ambientIntensity * (storm ? 1.5 : 1.3);
+    const fog = this.scene.fog as THREE.FogExp2;
+    if (fog) {
+      fog.density *= storm ? 2.3 : 1.7;
+      fog.color.lerp(new THREE.Color(storm ? 0x4a5568 : 0x8894a8), 0.55);
+    }
+  }
+
+  private updateWeather(dt: number): void {
+    if (!this.rain || !this.rainSeed) return;
+    this.rainT += dt;
+    const s = this.rainSeed;
+    const p = this.player.pos;
+    const d = this.rainDummy;
+    // wind shear leans the whole curtain; drops streak along their fall vector
+    const lean = this.weather === 'storm' ? 0.34 : 0.17;
+    for (let i = 0; i < this.rain.count; i++) {
+      const b = i * 5;
+      const speed = s[b + 3];
+      // wrap height over a 70-unit column, offset per drop so they don't pulse
+      let y = s[b + 1] - ((this.rainT * speed) % 70);
+      if (y < 0) y += 70;
+      const x = p.x + s[b] + y * lean;
+      const z = p.z + s[b + 2];
+      d.position.set(x, y, z);
+      d.rotation.set(0, 0, -lean);
+      d.scale.set(1, s[b + 4], 1);
+      d.updateMatrix();
+      this.rain.setMatrixAt(i, d.matrix);
+    }
+    this.rain.instanceMatrix.needsUpdate = true;
+
+    if (this.weather === 'storm') {
+      this.boltT -= dt;
+      if (this.boltT <= 0) {
+        this.nextBolt -= dt;
+        if (this.nextBolt <= 0) {
+          this.boltT = 0.16;
+          this.nextBolt = 5 + Math.random() * 11;
+          this.sfx('wreck', 0.35);
+        }
+      } else {
+        // two-stage flash: hot pop then a dimmer echo, like a real strike
+        const k = this.boltT / 0.16;
+        this.ambientLight.intensity = this.track.def.theme.light.ambientIntensity * 1.5
+          + (k > 0.6 ? 3.2 : 1.4) * k;
+        if (this.boltT - dt <= 0) {
+          this.ambientLight.intensity = this.track.def.theme.light.ambientIntensity * 1.5;
+        }
+      }
+    }
+  }
+
+  /** Current weather, read by the composer for the overcast grade. */
+  get currentWeather(): Weather { return this.weather; }
+
+  /** Wet tarmac = less grip. Weather is felt, not just seen. */
+  private get weatherGrip(): number {
+    return this.weather === 'storm' ? 0.80 : this.weather === 'rain' ? 0.88 : 1;
   }
 
   // ---------- hazards & live events ----------
@@ -714,6 +844,7 @@ export class Race {
     }
     this.updateAnimals(dt);
     this.updateLorry(dt);
+    if (this.weather !== 'clear') this.updateWeather(dt);
     this.shakeTrauma = Math.max(0, this.shakeTrauma - dt * 1.6);
 
     this.resolveCarCollisions(dt);
@@ -1010,7 +1141,8 @@ export class Race {
     // grip: velocity chases heading direction (drift)
     const dir = new THREE.Vector3(Math.sin(r.heading), 0, Math.cos(r.heading));
     const desiredVel = dir.multiplyScalar(r.speed);
-    const grip = (assist ? 8.5 : 6.0) * (r.offTrack ? 0.85 : 1) * (r.slip > 0 ? 0.16 : 1);
+    const grip = (assist ? 8.5 : 6.0) * (r.offTrack ? 0.85 : 1) * (r.slip > 0 ? 0.16 : 1)
+      * this.weatherGrip;
     const t = 1 - Math.exp(-grip * dt);
     r.vel.lerp(desiredVel, t);
     r.pos.addScaledVector(r.vel, dt);
@@ -1084,11 +1216,14 @@ export class Race {
     // motion evidence — every car kicks biome dust at speed ("no evidence that
     // anything is moving; parked toys" — critic). Budget-capped: effects are
     // per-mesh draw calls, so emission stops when the pool is busy.
-    const themeDust = this.track.def.theme.env.dust;
+    // wet roads throw pale spray instead of biome dust, and a lot more of it
+    const wet = this.weather !== 'clear';
+    const themeDust = wet ? 0xdfe9f4 : this.track.def.theme.env.dust;
     if (!r.finished && r.crash <= 0 && this.phase === 'racing') {
       const sp = Math.abs(r.speed);
-      if (sp > 16 && this.effects.length < 70 &&
-          Math.random() < Math.min(0.45, sp / 110 + Math.abs(slip) * 0.8)) {
+      if (sp > (wet ? 10 : 16) && this.effects.length < (wet ? 96 : 70) &&
+          Math.random() < Math.min(wet ? 0.75 : 0.45,
+            sp / (wet ? 70 : 110) + Math.abs(slip) * 0.8)) {
         const back = new THREE.Vector3(Math.sin(r.heading), 0, Math.cos(r.heading)).multiplyScalar(-2.0);
         const lat = new THREE.Vector3(Math.cos(r.heading), 0, -Math.sin(r.heading))
           .multiplyScalar((Math.random() - 0.5) * 1.6);
@@ -1554,6 +1689,15 @@ export class Race {
   }
 
   dispose(): void {
+    // restore the shared/cached track materials that wet weather mutated
+    for (const w of this.wetRestore) {
+      w.mat.roughness = w.rough;
+      w.mat.envMapIntensity = w.env;
+      w.mat.color.setHex(w.col);
+      w.mat.needsUpdate = true;
+    }
+    this.wetRestore = [];
+
     // The track group is cached and reused across races (its instanced foliage shares
     // geometry/materials from the model cache). Detach it WITHOUT disposing so the next
     // race can re-add it; dispose only the per-race scene contents (cars, effects, etc).

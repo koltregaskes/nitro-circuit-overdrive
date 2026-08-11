@@ -316,7 +316,14 @@ export function buildTrack(def: TrackDef, seed = 1337): BuiltTrack {
 
   // ---- road ribbon ----
   const roadTex = speckleTexture(theme.road, shade(theme.road, 1.25), shade(theme.road, 0.72), 2200, true);
-  group.add(buildRibbon(samples, -halfWidth, halfWidth, 0.0, roadTex, segLength));
+  const roadMesh = buildRibbon(samples, -halfWidth, halfWidth, 0.0, roadTex, segLength);
+  // PBR tarmac so wet weather can turn it reflective (Lambert has no roughness)
+  roadMesh.material = new THREE.MeshStandardMaterial({
+    map: roadTex, side: THREE.DoubleSide, roughness: 0.82, metalness: 0.0,
+  });
+  roadMesh.userData.road = true;   // wet-weather pass looks for this
+  roadMesh.receiveShadow = true;
+  group.add(roadMesh);
   // edge stripes (kerbs), alternating colors
   const stripeW = 0.9;
   group.add(buildKerb(samples, halfWidth, halfWidth + stripeW, theme.stripeA, theme.stripeB, 0.01, theme.night));

@@ -21,7 +21,7 @@ import {
 } from './game/save';
 import { buildTrack } from './game/track';
 import { GradeShader, TiltShiftShader } from './game/post';
-import { PlayerInput, Race, RaceMode, RaceResult, RacerConfig } from './game/race';
+import { PlayerInput, Race, RaceMode, RaceResult, RacerConfig, Weather } from './game/race';
 import { GameAudio } from './game/audio';
 import { PLAYER_CAR_MODELS, RIVAL_MODELS, ensureModelsLoaded } from './game/models';
 import { Hud } from './ui/hud';
@@ -90,6 +90,8 @@ class Game {
   private raceItemSnapshot = { missile: 0, mine: 0 };
   private raceMode: RaceMode = 'race';
   private raceTrackId = '';
+  private raceWeather: Weather = 'clear';
+  private forcedWeather: Weather | null = null;
   private photo = false;
   private photoOffset = new THREE.Vector2();
   private photoZoom = 1;
@@ -141,7 +143,7 @@ class Game {
       toSettings: () => this.toState('settings'),
       toModes: () => this.toState('modes'),
       toLeaderboards: () => this.toState('leaderboards'),
-      startModeRace: (mode, trackId) => this.startModeRace(mode, trackId),
+      startModeRace: (mode, trackId, weather) => this.startModeRace(mode, trackId, weather),
       resumeRace: () => this.setPaused(false),
       restartRace: () => this.restartRace(),
       quitRace: () => this.forfeitRace(),
@@ -248,7 +250,13 @@ class Game {
       grading.uniforms.highlightTint.value.copy(tint(grade2.highlightTint));
       grading.uniforms.saturation.value = grade2.saturation;
       grading.uniforms.contrast.value = grade2.contrast;
-      grading.uniforms.exposure.value = grade2.exposure ?? 1;
+      // overcast grade: rain pulls exposure and saturation down so a wet race
+      // reads as genuinely gloomy rather than a sunny day with streaks on it
+      const wx = this.race?.currentWeather ?? 'clear';
+      const wxExp = wx === 'storm' ? 0.62 : wx === 'rain' ? 0.78 : 1;
+      const wxSat = wx === 'storm' ? 0.72 : wx === 'rain' ? 0.85 : 1;
+      grading.uniforms.saturation.value = grade2.saturation * wxSat;
+      grading.uniforms.exposure.value = (grade2.exposure ?? 1) * wxExp;
       // aerial haze in the theme's fog colour — the eye reads frame-top as "far"
       const fogC = new THREE.Color().setHex(
         this.race?.track.def.theme.fog ?? 0xffffff, THREE.LinearSRGBColorSpace
@@ -460,8 +468,9 @@ class Game {
   }
 
   /** Start a one-off Time Trial or Elimination race on a chosen track. */
-  startModeRace(mode: RaceMode, trackId: string): void {
+  startModeRace(mode: RaceMode, trackId: string, weather?: Weather): void {
     const def = TRACKS.find((t) => t.id === trackId) ?? TRACKS[0];
+    this.forcedWeather = weather ?? null;
     void this.startNextRaceAsync(mode, def.id);
   }
 
@@ -476,6 +485,17 @@ class Game {
     // (setTimeout, not rAF — rAF is throttled when the tab isn't focused)
     await new Promise<void>((r) => setTimeout(r, 32));
     this.raceMode = mode;
+    // Weather: forced when the player picked it, otherwise a seeded-feeling
+    // roll — a wet race every so often is what makes a season feel alive.
+    if (this.forcedWeather) {
+      this.raceWeather = this.forcedWeather;
+      this.forcedWeather = null;
+    } else if (mode === 'timetrial') {
+      this.raceWeather = 'clear';         // hot laps stay comparable
+    } else {
+      const roll = Math.random();
+      this.raceWeather = roll < 0.12 ? 'storm' : roll < 0.32 ? 'rain' : 'clear';
+    }
     const raceIndex = p.cup.raceIndex;
     const trackId = trackOverride ?? cup.trackIds[raceIndex];
     const trackDef = TRACKS.find((t) => t.id === trackId) ?? TRACKS[0];
@@ -507,6 +527,7 @@ class Game {
         // Elimination needs one lap per cull, so every rival can actually be knocked
         // out; the track's own lap count is usually shorter than the grid size.
         laps: mode === 'elimination' ? RIVALS.length + 1 : undefined,
+        weather: this.raceWeather,
       }
     );
     const raceMs = performance.now() - tRace;

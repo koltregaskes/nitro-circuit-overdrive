@@ -9,7 +9,7 @@ import {
 import {
   Difficulty, Profile, carUpgrades, freshCup, resetProfile, saveProfile,
 } from '../game/save';
-import { RaceMode, RaceResult } from '../game/race';
+import { RaceMode, RaceResult, Weather } from '../game/race';
 import { PLAYER_CAR_MODELS, RIVAL_MODELS, buildCarFromModel } from '../game/models';
 import { buildCarMesh } from '../game/carmesh';
 import { MiniStage } from './ministage';
@@ -22,7 +22,7 @@ export interface ScreenActions {
   toSettings(): void;
   toModes(): void;
   toLeaderboards(): void;
-  startModeRace(mode: RaceMode, trackId: string): void;
+  startModeRace(mode: RaceMode, trackId: string, weather?: Weather): void;
   resumeRace(): void;
   restartRace(): void;
   quitRace(): void;
@@ -111,6 +111,7 @@ export class Screens {
   private profile: Profile;
   private stage: MiniStage | null = null;
   private envMap: THREE.Texture | null = null;
+  private pickWeather: Weather = 'clear';
 
   constructor(root: HTMLElement, profile: Profile, actions: ScreenActions) {
     this.root = root;
@@ -859,6 +860,24 @@ export class Screens {
       &nbsp;·&nbsp; <b class="pink">ELIMINATION</b> — last place is culled at the end of every lap.</div>`;
     div.appendChild(intro);
 
+    // weather selector — applies to Elimination runs launched from this screen
+    const wx = document.createElement('div');
+    wx.style.cssText = 'display:flex;gap:8px;align-items:center;width:100%;max-width:1180px;margin-bottom:12px';
+    const wxLabel = document.createElement('span');
+    wxLabel.className = 'muted';
+    wxLabel.style.cssText = 'font-size:12px;font-weight:700;letter-spacing:.08em';
+    wxLabel.textContent = 'WEATHER';
+    wx.appendChild(wxLabel);
+    const wxOpts: [Weather, string][] = [['clear', '☀ CLEAR'], ['rain', '🌧 RAIN'], ['storm', '⛈ STORM']];
+    for (const [val, label] of wxOpts) {
+      wx.appendChild(this.btn(label, 'small' + (this.pickWeather === val ? ' primary' : ''), () => {
+        this.pickWeather = val;
+        this.actions.sfx('click');
+        this.showModes();
+      }));
+    }
+    div.appendChild(wx);
+
     const grid = document.createElement('div');
     grid.className = 'race-grid';
     for (const track of TRACKS) {
@@ -874,7 +893,7 @@ export class Screens {
       const row = document.createElement('div');
       row.style.cssText = 'display:flex;gap:8px;margin-top:8px';
       row.appendChild(this.btn('⏱ TIME TRIAL', 'small primary', () => this.actions.startModeRace('timetrial', track.id)));
-      row.appendChild(this.btn('❌ ELIM', 'small', () => this.actions.startModeRace('elimination', track.id)));
+      row.appendChild(this.btn('❌ ELIM', 'small', () => this.actions.startModeRace('elimination', track.id, this.pickWeather)));
       card.appendChild(row);
       grid.appendChild(card);
       drawPreview(card.querySelector('canvas') as HTMLCanvasElement, track);
