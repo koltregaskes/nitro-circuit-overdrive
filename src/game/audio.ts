@@ -163,42 +163,86 @@ export class GameAudio {
     o.stop(t + dur + 0.05);
   }
 
+  /**
+   * Engine voice: a harmonic stack (not the old two-oscillator drone).
+   *
+   * A real engine's character comes from ORDERS — the fundamental plus strong
+   * even harmonics — plus a resonant filter that opens with load, and above all
+   * an RPM that sweeps and DROPS on each gearshift. A single fixed-ratio pair
+   * mapped to speed can only ever sound like a hairdryer.
+   */
+  private engineParts: { osc: OscillatorNode; gain: GainNode; mult: number }[] = [];
+  private engineFilter: BiquadFilterNode | null = null;
+  private whineOsc: OscillatorNode | null = null;
+  private whineGain: GainNode | null = null;
+  private rpmSmooth = 0;
+
   startEngine(): void {
     const ctx = this.ensure();
-    if (!ctx || !this.master || this.engineOsc) return;
+    if (!ctx || !this.master || this.engineParts.length) return;
     this.engineGain = ctx.createGain();
     this.engineGain.gain.value = 0;
+    this.engineGain.connect(this.busEngine ?? this.master);
+
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 420;
-    this.engineGain.connect(this.busEngine ?? this.master);
-    this.startScreech(ctx);
-
-    this.engineOsc = ctx.createOscillator();
-    this.engineOsc.type = 'sawtooth';
-    this.engineOsc.frequency.value = 42;
-    this.engineOsc.connect(filter);
+    filter.frequency.value = 500;
+    filter.Q.value = 6;              // resonance = throaty, not muffled
     filter.connect(this.engineGain);
-    this.engineOsc.start();
+    this.engineFilter = filter;
 
-    // sub-octave square adds body
-    this.engineSub = ctx.createOscillator();
-    this.engineSub.type = 'square';
-    this.engineSub.frequency.value = 21;
-    const subGain = ctx.createGain();
-    subGain.gain.value = 0.5;
-    this.engineSub.connect(subGain);
-    subGain.connect(filter);
-    this.engineSub.start();
+    // orders: sub, fundamental, 2nd (dominant in a V-engine), 3rd, 4th
+    const spec: [number, OscillatorType, number][] = [
+      [0.5, 'sine', 0.55],
+      [1.0, 'sawtooth', 0.5],
+      [2.0, 'square', 0.32],
+      [3.0, 'sawtooth', 0.16],
+      [4.0, 'square', 0.09],
+    ];
+    for (const [mult, type, level] of spec) {
+      const osc = ctx.createOscillator();
+      osc.type = type;
+      osc.frequency.value = 60 * mult;
+      // a few cents of detune per order stops it sounding like an organ chord
+      osc.detune.value = (mult * 7) % 11;
+      const gain = ctx.createGain();
+      gain.gain.value = level;
+      osc.connect(gain);
+      gain.connect(filter);
+      osc.start();
+      this.engineParts.push({ osc, gain, mult });
+    }
+
+    // turbo/nitro whine, silent until boosting
+    const whine = ctx.createOscillator();
+    whine.type = 'triangle';
+    whine.frequency.value = 900;
+    const wg = ctx.createGain();
+    wg.gain.value = 0;
+    whine.connect(wg);
+    wg.connect(this.engineGain);
+    whine.start();
+    this.whineOsc = whine;
+    this.whineGain = wg;
+
+    this.startScreech(ctx);
   }
 
   stopEngine(): void {
-    for (const osc of [this.engineOsc, this.engineSub]) {
-      if (osc) {
-        try { osc.stop(); } catch { /* already stopped */ }
-        osc.disconnect();
-      }
+    for (const p of this.engineParts) {
+      try { p.osc.stop(); } catch { /* already stopped */ }
+      p.osc.disconnect();
+      p.gain.disconnect();
     }
+    this.engineParts = [];
+    this.rpmSmooth = 0;
+    if (this.whineOsc) {
+      try { this.whineOsc.stop(); } catch { /* already stopped */ }
+      this.whineOsc.disconnect();
+      this.whineOsc = null;
+    }
+    if (this.whineGain) { this.whineGain.disconnect(); this.whineGain = null; }
+    if (this.engineFilter) { this.engineFilter.disconnect(); this.engineFilter = null; }
     this.engineOsc = null;
     this.engineSub = null;
     if (this.engineGain) { this.engineGain.disconnect(); this.engineGain = null; }
@@ -210,12 +254,40 @@ export class GameAudio {
     if (this.screechGain) { this.screechGain.disconnect(); this.screechGain = null; }
   }
 
-  updateEngine(speedFrac: number, boosting: boolean): void {
-    if (!this.engineOsc || !this.engineSub || !this.engineGain || !this.ctx) return;
-    const f = 42 + speedFrac * 130 + (boosting ? 38 : 0);
-    this.engineOsc.frequency.setTargetAtTime(f, this.ctx.currentTime, 0.05);
-    this.engineSub.frequency.setTargetAtTime(f / 2, this.ctx.currentTime, 0.05);
-    this.engineGain.gain.setTargetAtTime(0.1 + speedFrac * 0.16 + (boosting ? 0.05 : 0), this.ctx.currentTime, 0.1);
+  /**
+   * @param speedFrac 0..1 of top speed
+   * @param boosting  nitro active
+   * @param gear      1..6 — RPM resets each gear, which is what sells "engine"
+   * @param throttle  0..1 load, opens the filter
+   */
+  updateEngine(speedFrac: number, boosting: boolean, gear = 1, throttle = 1): void {
+    if (!this.engineParts.length || !this.engineGain || !this.ctx || !this.engineFilter) return;
+    const t = this.ctx.currentTime;
+
+    // RPM sweeps 0..1 WITHIN the current gear, so each shift drops the pitch and
+    // climbs again — the single most important cue for a believable engine.
+    const perGear = 1 / 6;
+    const inGear = Math.min(1, Math.max(0, (speedFrac - (gear - 1) * perGear) / perGear));
+    const rpm = 0.18 + inGear * 0.82;
+    // smooth so shifts glide rather than click; fast attack, slower release
+    this.rpmSmooth += (rpm - this.rpmSmooth) * (rpm > this.rpmSmooth ? 0.5 : 0.25);
+    const r = this.rpmSmooth;
+
+    const fundamental = 52 + r * 104 + (boosting ? 16 : 0);
+    for (const p of this.engineParts) {
+      p.osc.frequency.setTargetAtTime(fundamental * p.mult, t, 0.035);
+    }
+    // filter opens with revs AND load — closed throttle = engine braking burble
+    this.engineFilter.frequency.setTargetAtTime(
+      340 + r * 1500 + throttle * 520 + (boosting ? 700 : 0), t, 0.06
+    );
+    this.engineGain.gain.setTargetAtTime(
+      0.085 + speedFrac * 0.13 + r * 0.04 + (boosting ? 0.05 : 0), t, 0.09
+    );
+    if (this.whineGain && this.whineOsc) {
+      this.whineOsc.frequency.setTargetAtTime(700 + r * 1500, t, 0.08);
+      this.whineGain.gain.setTargetAtTime(boosting ? 0.028 : 0, t, 0.12);
+    }
   }
 
   /** One-shot tone with its own gain envelope. */

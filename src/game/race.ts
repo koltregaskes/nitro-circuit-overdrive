@@ -324,10 +324,12 @@ export class Race {
     sun.castShadow = true;
     // frustum widened for the long shadows the raking angle throws
     sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -95;
-    sun.shadow.camera.right = 95;
-    sun.shadow.camera.top = 95;
-    sun.shadow.camera.bottom = -95;
+    // widened for the perspective rig — the chase camera sees further ahead than
+    // the old ortho box, so a tight frustum clipped shadows off mid-frame
+    sun.shadow.camera.left = -130;
+    sun.shadow.camera.right = 130;
+    sun.shadow.camera.top = 130;
+    sun.shadow.camera.bottom = -130;
     sun.shadow.camera.near = 10;
     sun.shadow.camera.far = 420;
     sun.shadow.bias = -0.0004;
@@ -622,6 +624,13 @@ export class Race {
     return Math.min(1, Math.abs(this.player.speed) / this.maxSpeedOf(this.player));
   }
   get playerBoosting(): boolean { return this.player.boosting; }
+
+  /** Camera lead offset (world x/z) — where the player is heading, scaled by speed. */
+  get playerLead(): THREE.Vector2 {
+    const r = this.player;
+    const f = Math.min(1, Math.abs(r.speed) / 42) * 13;
+    return new THREE.Vector2(Math.sin(r.heading) * f, Math.cos(r.heading) * f);
+  }
 
   /** 0-1 tyre-slide amount for the player, used to drive the screech bus. */
   get playerSlip(): number {

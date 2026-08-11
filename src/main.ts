@@ -31,6 +31,15 @@ type GameState =
   | 'menu' | 'tournament' | 'garage' | 'settings' | 'race' | 'results'
   | 'modes' | 'leaderboards';
 
+// ---- chase camera rig ----
+// A narrow FOV keeps the readable "top-down" feel while still giving real
+// perspective; the tilt is what actually sells depth — at the old 65° you saw
+// only the tops of things, so every silhouette in the world was wasted.
+const CAM_FOV = 34;
+const CAM_TILT = THREE.MathUtils.degToRad(46); // above horizontal
+/** Framing height in world units at the focus plane, before the zoom setting. */
+const CAM_VIEW_H = 62;
+
 class Input {
   private down = new Set<string>();
   private pressed = new Set<string>();
@@ -66,7 +75,9 @@ class Input {
 
 class Game {
   private renderer: THREE.WebGLRenderer;
-  private camera: THREE.OrthographicCamera;
+  private camera: THREE.PerspectiveCamera;
+  /** world-space distance from the camera to its look-at target */
+  private camDist = 150;
   private profile: Profile;
   private audio = new GameAudio();
   private input = new Input();
@@ -82,7 +93,9 @@ class Game {
   private photo = false;
   private photoOffset = new THREE.Vector2();
   private photoZoom = 1;
+  private photoTilt = CAM_TILT;
   private camPos = new THREE.Vector3();
+  private camFocus = new THREE.Vector3();
   private lastTime = performance.now();
   private composer: EffectComposer | null = null;
   private bloomPass: UnrealBloomPass | null = null;
@@ -112,7 +125,10 @@ class Game {
     this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     // far plane reaches past the sky-dome radius (1200) so the dome, which is centred
     // on the world origin and encloses the roaming camera, is never clipped away
-    this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 2200);
+    // PERSPECTIVE, not orthographic. Ortho projection is flat by definition — no
+    // foreshortening, no parallax, no vertical faces — which is exactly why the
+    // game read as "a board game on a table" no matter how much art went in.
+    this.camera = new THREE.PerspectiveCamera(CAM_FOV, 1, 1, 3000);
     this.profile = loadProfile();
     this.audio.volume = this.profile.settings.volume;
 
@@ -305,17 +321,32 @@ class Game {
     return result;
   }
 
-  private updateCameraFrustum(): void {
+  /**
+   * Perspective rig: the zoom setting now drives DISTANCE rather than an ortho
+   * box. Distance is solved from the framing height we want at the focus plane,
+   * so `zoom` keeps its old meaning and narrow/portrait windows still get enough
+   * track width to read.
+   */
+  private updateCameraFrustum(zoomScale = 1): void {
     const w = window.innerWidth, h = window.innerHeight;
-    const aspect = w / h;
-    // keep at least ~86 world units of horizontal view on narrow/portrait displays
-    const base = 78 / this.profile.settings.zoom;
-    const viewH = Math.max(base, (86 / this.profile.settings.zoom) / aspect);
-    this.camera.left = -viewH * aspect / 2;
-    this.camera.right = viewH * aspect / 2;
-    this.camera.top = viewH / 2;
-    this.camera.bottom = -viewH / 2;
+    const aspect = Math.max(w / h, 0.0001);
+    const z = this.profile.settings.zoom;
+    const viewH = Math.max(CAM_VIEW_H / z, (74 / z) / aspect) * zoomScale;
+    this.camera.fov = CAM_FOV;
+    this.camera.aspect = aspect;
+    this.camera.near = 1;
+    this.camera.far = 3000;
     this.camera.updateProjectionMatrix();
+    // half-height / tan(halfFov) = distance that frames exactly viewH world units
+    this.camDist = (viewH * 0.5) / Math.tan(THREE.MathUtils.degToRad(CAM_FOV) * 0.5);
+  }
+
+  /** Place the chase camera behind/above a world-space target. */
+  private placeCamera(tx: number, tz: number, tilt = CAM_TILT): void {
+    const horiz = Math.cos(tilt) * this.camDist;
+    const vert = Math.sin(tilt) * this.camDist;
+    this.camera.position.set(tx, vert, tz - horiz);
+    this.camera.lookAt(tx, 0, tz);
   }
 
   private applySettings(): void {
@@ -333,6 +364,7 @@ class Game {
     if (this.photo) {
       this.photoOffset.set(0, 0);
       this.photoZoom = 1;
+      this.photoTilt = CAM_TILT;
       this.hud.unmount();
       this.screens.showPhotoMode(() => this.togglePhotoMode(), () => this.capturePhoto());
     } else {
@@ -496,8 +528,8 @@ class Game {
     this.hud.update(this.race.hudState());
     // pre-compile shaders + warm one frame so the countdown doesn't judder
     this.setupComposer(this.race.scene);
-    this.camera.position.set(this.camPos.x, 110, this.camPos.z - 52);
-    this.camera.lookAt(this.camPos.x, 0, this.camPos.z);
+    this.updateCameraFrustum();
+    this.placeCamera(this.camPos.x, this.camPos.z);
     this.renderer.compile(this.race.scene, this.camera);
     this.composer?.render();
 
@@ -674,20 +706,30 @@ class Game {
           dropMine: this.input.consume('KeyE') || (pad?.mine ?? false),
         };
         this.race.update(dt, pi, this.profile.settings.assist);
-        this.audio.updateEngine(this.race.playerSpeedFrac, this.race.playerBoosting);
+        const hs = this.race.hudState();
+        this.audio.updateEngine(
+          this.race.playerSpeedFrac, this.race.playerBoosting,
+          hs.gear, pi.throttle ? 1 : (pi.brake ? 0 : 0.25)
+        );
         this.audio.setScreech(this.race.playerSlip);
       }
 
-      // camera follow (fixed world orientation, slight tilt for 2.5D readability)
+      // camera follow — fixed world orientation, perspective chase rig.
+      // Lead the camera slightly toward where the car is heading and pull it back
+      // with speed: both are depth cues an ortho camera physically cannot give.
       const target = this.race.playerPos;
-      this.camPos.lerp(target, 1 - Math.exp(-5 * dt));
-      this.camera.position.set(this.camPos.x, 110, this.camPos.z - 52);
-      this.camera.lookAt(this.camPos.x, 0, this.camPos.z);
+      const lead = this.race.playerLead;
+      this.camFocus.set(target.x + lead.x, 0, target.z + lead.y);
+      this.camPos.lerp(this.camFocus, 1 - Math.exp(-4.5 * dt));
+      const speedPull = 1 + this.race.playerSpeedFrac * 0.16;
+      this.updateCameraFrustum(speedPull);
+      this.placeCamera(this.camPos.x, this.camPos.z);
       // crash/impact screen shake
       const trauma = this.race.shakeTrauma;
       if (trauma > 0) {
         const s = trauma * trauma * 7;
         this.camera.position.x += (Math.random() - 0.5) * s;
+        this.camera.position.y += (Math.random() - 0.5) * s * 0.5;
         this.camera.position.z += (Math.random() - 0.5) * s;
       }
       if (!skipRender) {
@@ -707,7 +749,7 @@ class Game {
     this.input.endFrame();
   }
 
-  /** Photo mode: WASD/arrows pan, Q/E zoom, R recentres on the player. */
+  /** Photo mode: WASD/arrows pan, Q/E zoom, Z/X tilt, R recentres on the player. */
   private updatePhotoCamera(dt: number): void {
     if (!this.race) return;
     const pan = 42 * dt * this.photoZoom;
@@ -717,23 +759,19 @@ class Game {
     if (this.input.isDown('KeyS', 'ArrowDown')) this.photoOffset.y += pan;
     if (this.input.isDown('KeyQ')) this.photoZoom = Math.min(2.6, this.photoZoom + dt * 1.1);
     if (this.input.isDown('KeyE')) this.photoZoom = Math.max(0.35, this.photoZoom - dt * 1.1);
-    if (this.input.consume('KeyR')) { this.photoOffset.set(0, 0); this.photoZoom = 1; }
+    // perspective makes a tilt control meaningful — drop to near ground level for
+    // hero shots, or climb back toward the gameplay angle
+    if (this.input.isDown('KeyZ')) this.photoTilt = Math.max(0.12, this.photoTilt - dt * 0.7);
+    if (this.input.isDown('KeyX')) this.photoTilt = Math.min(1.5, this.photoTilt + dt * 0.7);
+    if (this.input.consume('KeyR')) {
+      this.photoOffset.set(0, 0); this.photoZoom = 1; this.photoTilt = CAM_TILT;
+    }
 
     const t = this.race.playerPos;
     const cx = t.x + this.photoOffset.x;
     const cz = t.z + this.photoOffset.y;
-    this.camera.position.set(cx, 110, cz - 52);
-    this.camera.lookAt(cx, 0, cz);
-    // widen/narrow the ortho box instead of dollying — keeps the 2.5D framing
-    const w = window.innerWidth, h = window.innerHeight;
-    const aspect = w / h;
-    const base = (78 / this.profile.settings.zoom) * this.photoZoom;
-    const viewH = Math.max(base, ((86 / this.profile.settings.zoom) * this.photoZoom) / aspect);
-    this.camera.left = -viewH * aspect / 2;
-    this.camera.right = viewH * aspect / 2;
-    this.camera.top = viewH / 2;
-    this.camera.bottom = -viewH / 2;
-    this.camera.updateProjectionMatrix();
+    this.updateCameraFrustum(this.photoZoom);
+    this.placeCamera(cx, cz, this.photoTilt);
   }
 
   /** ?perf — roll up whole-frame draw calls/triangles once a second. */
