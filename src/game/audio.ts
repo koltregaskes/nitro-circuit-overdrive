@@ -356,6 +356,7 @@ export class GameAudio {
                         this.tone(ctx, 'sine', 780, 520, 0.12, 0.3 * vol, 0.1); break;
       case 'alert':     this.tone(ctx, 'square', 880, 880, 0.12, 0.3 * vol);
                         this.tone(ctx, 'square', 660, 660, 0.12, 0.3 * vol, 0.15); break;
+      case 'nearmiss':  this.tone(ctx, 'sine', 740, 1180, 0.12, 0.34 * vol); break;
       case 'finalLap':  this.tone(ctx, 'sine', 520, 780, 0.3, 0.4 * vol); break;
       case 'finish':    this.tone(ctx, 'sine', 523, 523, 0.18, 0.35 * vol);
                         this.tone(ctx, 'sine', 659, 659, 0.18, 0.35 * vol, 0.16);

@@ -627,7 +627,8 @@ class Game {
     }
 
     const points = cup.pointsByPosition[playerRes.position - 1] ?? 0;
-    const cash = cup.cashByPosition[playerRes.position - 1] ?? 0;
+    const nearMissBonus = this.race?.nearMissBonus() ?? 0;
+    const cash = (cup.cashByPosition[playerRes.position - 1] ?? 0) + nearMissBonus;
     p.cash += cash;
     p.totalEarned += cash;
 
@@ -637,7 +638,7 @@ class Game {
       saveProfile(p);
       this.state = 'results';
       this.audio.stopEngine();
-      this.screens.showResults(results, 0, cash, false, 'elimination');
+      this.screens.showResults(results, 0, cash, false, 'elimination', nearMissBonus);
       return;
     }
 
@@ -654,7 +655,7 @@ class Game {
 
     this.state = 'results';
     this.audio.stopEngine();
-    this.screens.showResults(results, points, cash, isLastRace);
+    this.screens.showResults(results, points, cash, isLastRace, 'race', nearMissBonus);
   }
 
   private advanceCup(): void {

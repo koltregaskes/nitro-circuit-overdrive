@@ -683,7 +683,7 @@ export class Screens {
   // ---------------- race results ----------------
   showResults(
     results: RaceResult[], pointsEarned: number, cashEarned: number,
-    isLastRace: boolean, mode: RaceMode = 'race'
+    isLastRace: boolean, mode: RaceMode = 'race', nearMissBonus = 0,
   ): void {
     this.clear();
     const div = document.createElement('div');
@@ -699,7 +699,9 @@ export class Screens {
       <h2 style="font-size:34px" class="${won ? 'gold trophy-pop' : 'cyan'}">${heading}</h2>
       <div class="muted" style="margin:6px 0 18px">${
         elim ? '' : `+${pointsEarned} cup points · `
-      }<span class="green">${money(cashEarned)}</span> prize money</div>`;
+      }<span class="green">${money(cashEarned)}</span> prize money${
+        nearMissBonus > 0 ? ` · ${money(nearMissBonus)} from near misses` : ''
+      }</div>`;
     if (won) { this.confetti(div); this.actions.sfx('fanfare'); this.actions.sfx('voice:win'); }
 
     // podium: top-3 cars on blocks, slow camera arc behind the HTML overlay

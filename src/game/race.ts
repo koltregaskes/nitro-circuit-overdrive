@@ -174,6 +174,26 @@ export interface RaceOptions {
 /** Sampling stride for ghost recording — every Nth frame keeps the save small. */
 export const GHOST_STRIDE = 3;
 
+/** Cash added to the prize purse for each clean door-to-door pass. */
+export const NEAR_MISS_BONUS = 200;
+
+/**
+ * A near miss is a fast pass just outside the collision shell, sitting
+ * alongside the other car rather than nose-to-tail.
+ */
+export function isNearMiss(
+  player: { x: number; z: number; heading: number; speed: number },
+  other: { x: number; z: number; speed: number },
+): boolean {
+  if (player.speed < 16 || Math.abs(other.speed) < 8) return false;
+  const dx = other.x - player.x;
+  const dz = other.z - player.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist <= 2.45 || dist > 4.2) return false;
+  const along = dx * Math.sin(player.heading) + dz * Math.cos(player.heading);
+  return Math.abs(along) <= 1.7;
+}
+
 const GRID_COLORS_FALLBACK = 0x888888;
 
 // Inward-facing gradient sky dome (art-of-rally look): horizon = fog colour so the
@@ -252,6 +272,8 @@ export class Race {
   private raceTime = 0;
   private message: string | null = null;
   private messageTime = 0;
+  private nearMissCash = 0;
+  private nearMissCd = new Map<string, number>();
   private finishedOrder: Racer[] = [];
   private onFinish: (results: RaceResult[]) => void;
   private player!: Racer;
@@ -850,6 +872,7 @@ export class Race {
     this.shakeTrauma = Math.max(0, this.shakeTrauma - dt * 1.6);
 
     this.resolveCarCollisions(dt);
+    this.scoreNearMisses(dt);
     this.updateMissiles(dt);
     this.updateMines(dt);
     this.updateEffects(dt);
@@ -1324,6 +1347,36 @@ export class Race {
       this.message = `${doomed.cfg.name} ELIMINATED`;
       this.messageTime = 1.8;
       this.sfx('alert');
+    }
+  }
+
+  nearMissBonus(): number {
+    return this.nearMissCash;
+  }
+
+  private scoreNearMisses(dt: number): void {
+    for (const [id, left] of this.nearMissCd) {
+      const next = left - dt;
+      if (next <= 0) this.nearMissCd.delete(id);
+      else this.nearMissCd.set(id, next);
+    }
+    const player = this.player;
+    if (this.phase !== 'racing' || player.finished || player.crash > 0 || player.stun > 0) return;
+    for (const other of this.racers) {
+      if (other === player || other.finished || other.crash > 0) continue;
+      if (this.eliminated.has(other.cfg.id)) continue;
+      if ((this.nearMissCd.get(other.cfg.id) ?? 0) > 0) continue;
+      if (!isNearMiss(
+        { x: player.pos.x, z: player.pos.z, heading: player.heading, speed: Math.abs(player.speed) },
+        { x: other.pos.x, z: other.pos.z, speed: Math.abs(other.speed) },
+      )) continue;
+      this.nearMissCd.set(other.cfg.id, 1.6);
+      this.nearMissCash += NEAR_MISS_BONUS;
+      if (!this.message || this.message.startsWith('NEAR MISS')) {
+        this.message = `NEAR MISS +$${NEAR_MISS_BONUS}`;
+        this.messageTime = 1.15;
+      }
+      this.sfx('nearmiss', 0.7);
     }
   }
 

@@ -53,6 +53,7 @@ npm run preview    # serve the production build
   assist, grass slowdown, soft outer boundaries (no hard walls, no insta-death).
 - **Weapons & damage:** boost meter, homing front missiles, proximity mines,
   armour, spin-outs, wreck = brief stun + partial auto-repair (forgiving).
+  A fast door-to-door pass scores a near miss and adds $200 to the prize.
   Damage persists after the race as car condition; repair in the garage.
 - **Garage/shop:** 4 upgrade lines × 5 levels (engine/handling/armour/boost),
   missile/mine purchases, full repair, 3 buyable cars (Rival-X starter,
