@@ -58,7 +58,7 @@ export const CARS: CarSpec[] = [
     base: { speed: 9.6, accel: 9.0, handling: 9.2, armour: 8.0, boost: 9.4 },
     blurb: 'The legend. Unmatched.',
   },
-  // --- Phase 4 roster: the remaining Kenney silhouettes, so every body is playable ---
+  // --- These six have no GLB. They share the procedural stock chassis; the garage labels that. ---
   {
     id: 'cab-12', name: 'Cab-12', tier: 1, price: 24000,
     color: 0xf2b33d, accent: 0x1a1a1a,
