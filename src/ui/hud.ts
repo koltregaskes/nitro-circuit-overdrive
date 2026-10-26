@@ -1,7 +1,6 @@
 // In-race HUD: position, lap board, timer, minimap, items, speed, armour.
 
 import { HudState } from '../game/race';
-import { CUPS } from '../game/data';
 
 function fmtTime(ms: number | null): string {
   if (ms === null || !isFinite(ms)) return '--:--.---';
@@ -36,7 +35,7 @@ export class Hud {
     this.root = root;
   }
 
-  mount(trackPath: { x: number; y: number }[], bestTrackMs: number | null): void {
+  mount(trackPath: { x: number; y: number }[], bestTrackMs: number | null, cupName: string): void {
     this.trackPath = trackPath;
     this.bestTrackMs = bestTrackMs;
     this.root.innerHTML = `
@@ -46,7 +45,7 @@ export class Hud {
       </div>
       <div class="hud-board" id="h-board"></div>
       <div class="hud-top-right">
-        <div class="hud-cup">${CUPS[CUPS.length - 1].name} 🏆</div>
+        <div class="hud-cup">${cupName} 🏆</div>
         <div class="hud-timer" id="h-timer">00:00.000</div>
         <div class="hud-best">BEST <span id="h-best">--:--.---</span></div>
       </div>

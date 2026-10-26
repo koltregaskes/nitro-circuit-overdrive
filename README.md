@@ -33,35 +33,39 @@ npm run preview    # serve the production build
 
 ## Controls
 
-| Key | Action |
-|---|---|
-| `W A S D` / arrows | throttle / brake / steer |
-| `L-Shift` | boost (meter drains, regenerates) |
-| `F` | front missile (homing, hits first racer ahead) |
-| `E` | drop mine behind |
-| `Esc` | pause (resume / restart / forfeit) |
+Keyboard and a standard gamepad (Xbox layout) both drive. The menu footer lists the same bindings.
 
-## What's in the slice
+| Keyboard | Gamepad | Action |
+|---|---|---|
+| `W` / Up | RT or A | throttle |
+| `S` / Down | LT or B | brake |
+| `A` / Left, `D` / Right | left stick | steer |
+| Left Shift | X | boost (meter drains, regenerates) |
+| `F` | RB | front missile (homing, hits the first racer ahead) |
+| `E` | LB | drop a mine behind |
+| Esc | Start | pause (resume / restart / forfeit) |
 
-- **Camera:** fixed-orientation orthographic top-down with a slight tilt
-  (~64° elevation). Never becomes a chase camera. Camera zoom adjustable in settings.
-- **1 cup, 4 races:** Autumn Cup 2026 — Dockyard Dash, Forest Run, Glacier Gate,
-  Neon Boulevard (4 themes: desert, forest, snow, night; 3–4 laps).
-- **6 cars per race:** player + 5 named AI rivals with distinct skill levels,
-  corner-speed awareness, rubber-banding, and AI item/boost usage.
-- **Arcade handling:** forgiving grip model with drift slip, optional steering
-  assist, grass slowdown, soft outer boundaries (no hard walls, no insta-death).
-- **Weapons & damage:** boost meter, homing front missiles, proximity mines,
-  armour, spin-outs, wreck = brief stun + partial auto-repair (forgiving).
-  A fast door-to-door pass scores a near miss and adds $200 to the prize.
-  Damage persists after the race as car condition; repair in the garage.
-- **Garage/shop:** 4 upgrade lines × 5 levels (engine/handling/armour/boost),
-  missile/mine purchases, full repair, 3 buyable cars (Rival-X starter,
-  Kolt-47, Vex-77).
-- **Tournament:** points table (10/8/6/4/2/1), prize money, cup standings,
-  champion bonus, new-cup restart that keeps your money/cars.
-- **Tutorial cards** on first race; **settings** (volume, zoom, assist, save reset);
-  **save/load** via localStorage; procedural WebAudio sound (engine, weapons, UI).
+`P` during a race freezes the sim for a photo. In photo mode, WASD pans, Q/E zoom, Z/X tilt, R recentres, Esc returns to the race.
+
+## Career
+
+Three cups, twelve tracks, twelve garage cars. Finish the cup you are in — the standings screen names a champion or your place — then the next unlocked cup, or race the same cup again. Cash, cars, and upgrades carry over. Street Cup opens after $40,000 total prize money; Overdrive Cup 2026 opens after $140,000.
+
+| Cup | Races | Points | Champion bonus |
+|---|---|---|---|
+| **Rookie Cup** (open) | Sunset Mile, Dockyard Dash, Dune Sweep, Forest Run | 10/8/6/4/2/1 | $15,000 |
+| **Street Cup** | Canyon Run, Midnight Mall, Glacier Gate, Pine Hairpins, Neon Boulevard | 10/8/6/4/2/1 | $25,000 |
+| **Overdrive Cup 2026** | Icebreaker, Frostbite Loop, Canyon Run, Pine Hairpins, Neon Boulevard, Grand Overdrive | 12/9/7/5/3/1 | $50,000 |
+
+- **Camera:** perspective top-down, about 46° above the horizon. It stays readable and never drops into a bumper chase cam. Zoom is in settings.
+- **12 tracks** across desert, forest, snow, and night. Lap counts run from 4 to 7.
+- **6 cars per race:** you plus five named AI rivals with distinct skill, corner-speed awareness, rubber-banding, and item/boost use.
+- **Arcade handling:** forgiving grip with drift slip, optional steering assist, grass slowdown, soft outer boundaries (no hard walls, no insta-death).
+- **Weapons & damage:** boost meter, homing front missiles, proximity mines, armour, spin-outs. A wreck is a brief stun plus partial auto-repair. A fast door-to-door pass scores a near miss and adds $200 to the prize. Damage persists as car condition; repair it in the garage.
+- **Garage:** four upgrade lines × five levels (engine, handling, armour, boost), missile and mine purchases, full repair, liveries, and twelve cars. Rival-X is the starter. Kolt-47, Vex-77, Hex-9, Nitrous, and Ghost use Kenney bodies. Ghost shares the future-race body with Vex-77, and the garage says so. Cab-12, Hauler, Courier, Enforcer, Drifter, and Apex have no model of their own — they share the stock chassis, and each card is labeled with that car's name plus "shared stock chassis".
+- **Tournament:** prize money by finish, live cup standings, a champion bonus, and a restart from race 1 that keeps your money and cars. The in-race HUD names the cup you are actually running.
+- **Single events:** Time Trial (solo hot laps, ghost, leaderboard) and Elimination (last place is culled each lap).
+- **Tutorial cards** on the first race; **settings** (volume, zoom, assist, difficulty, quality, save reset); **save/load** via localStorage; procedural WebAudio plus a few announcer clips.
 
 ## Debug / test hook
 
@@ -72,8 +76,7 @@ to dump canvas screenshots into `shots/`.
 
 ## Known limitations
 
-- Single chunk > 500 kB (three.js not code-split) — fine for a slice.
-- No gamepad support yet (keyboard only).
+- Single chunk > 500 kB (three.js not code-split).
 - AI cars don't avoid mines and have simple racing lines.
 - Rival cars are stat-scaled per race, not per-rival garage builds.
 - Track decoration is sparse placeholder (blob trees, rocks, flags).

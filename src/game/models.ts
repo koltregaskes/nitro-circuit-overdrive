@@ -17,6 +17,47 @@ export const PLAYER_CAR_MODELS: Record<string, string> = {
   'ghost': 'race-future',
 };
 
+const CAR_NAMES: Record<string, string> = {
+  'rival-x': 'Rival-X',
+  'kolt-47': 'Kolt-47',
+  'vex-77': 'Vex-77',
+  'hex-9': 'Hex-9',
+  nitrous: 'Nitrous',
+  ghost: 'Ghost',
+  'cab-12': 'Cab-12',
+  hauler: 'Hauler',
+  courier: 'Courier',
+  enforcer: 'Enforcer',
+  drifter: 'Drifter',
+  apex: 'Apex',
+};
+
+const MODEL_BODY: Record<string, string> = {
+  race: 'Race body',
+  'sedan-sports': 'Sports sedan body',
+  'race-future': 'Future race body',
+  'hatchback-sports': 'Sports hatch body',
+  suv: 'SUV body',
+};
+
+/**
+ * Garage label for the mesh a car actually uses.
+ * Cab-12, Hauler, Courier, Enforcer, Drifter and Apex have no GLB of their own
+ * and share the procedural stock chassis — the label says so, and names the car
+ * so the six stay distinct. A shared GLB (Ghost / Vex-77) is labeled shared too.
+ */
+export function carBodyLabel(carId: string): string {
+  const name = CAR_NAMES[carId] ?? carId;
+  const model = PLAYER_CAR_MODELS[carId];
+  if (!model) return `${name} · shared stock chassis`;
+  const others = Object.entries(PLAYER_CAR_MODELS)
+    .filter(([id, m]) => id !== carId && m === model)
+    .map(([id]) => CAR_NAMES[id] ?? id);
+  const body = MODEL_BODY[model] ?? `${model} body`;
+  if (others.length === 0) return body;
+  return `${body}, shared with ${others.join(' and ')}`;
+}
+
 /** Rival id -> model file */
 export const RIVAL_MODELS: Record<string, string> = {
   hayes: 'race-future',
