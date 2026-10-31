@@ -20,7 +20,7 @@ backend. Runs entirely in the browser.
 | Thing | Location |
 |---|---|
 | Canonical repo | `https://github.com/koltregaskes/nitro-circuit-overdrive` (public) |
-| Kol's copy (NAS) | `W:\200-build-room\Projects\nitro-circuit-overdrive` |
+| Kol's copy (NAS) | `F:\Repos\games\nitro-circuit-overdrive` |
 | Local dev clone | `C:\dev\nitro` |
 | Live game | `https://koltregaskes.github.io/nitro-circuit-overdrive/` |
 | Also listed on | `https://elusionworks.com/demos` (card added; that site's repo is `koltregaskes/elusion-works`) |
