@@ -672,7 +672,7 @@ export class Race {
     mesh.rotation.y = Math.atan2(dir.x, dir.z);
     this.scene.add(mesh);
     this.animals.push({ mesh, pos: start, dir, speed: 6, hopT: 0, fleeing: false, life: 14 });
-    this.message = 'âš  ANIMAL ON TRACK!';
+    this.message = 'ANIMAL ON TRACK!';
     this.messageTime = 2.2;
     this.sfx('alert');
   }
@@ -703,7 +703,7 @@ export class Race {
       mesh: lorry, phase: 'approach', t: 0,
       startPos, crashPos, baseIdx, side, headingY, spillT: 0, spillCount: 0,
     };
-    this.message = 'âš  RUNAWAY TANKER!';
+    this.message = 'RUNAWAY TANKER!';
     this.messageTime = 2.4;
     this.sfx('alert');
   }
@@ -1340,7 +1340,7 @@ export class Race {
     // classify eliminated racers behind everyone still running
     this.finishedOrder.unshift(doomed);
     if (doomed.cfg.isPlayer) {
-      this.message = 'âŒ ELIMINATED';
+      this.message = 'ELIMINATED';
       this.messageTime = 2.4;
       this.sfx('wreck');
     } else {
@@ -1526,7 +1526,7 @@ export class Race {
     if (r.cfg.isPlayer) {
       this.sfx('wreck');
       this.addShake(0.9);
-      this.message = 'ðŸ’¥ CRASH!';
+      this.message = 'CRASH!';
       this.messageTime = 1.4;
     }
   }

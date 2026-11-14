@@ -10,7 +10,7 @@ import {
   Difficulty, Profile, carUpgrades, freshCup, resetProfile, saveProfile,
 } from '../game/save';
 import { RaceMode, RaceResult, Weather } from '../game/race';
-import { PLAYER_CAR_MODELS, RIVAL_MODELS, buildCarFromModel } from '../game/models';
+import { PLAYER_CAR_MODELS, RIVAL_MODELS, buildCarFromModel, carBodyLabel } from '../game/models';
 import { buildCarMesh } from '../game/carmesh';
 import { MiniStage } from './ministage';
 
@@ -196,7 +196,7 @@ export class Screens {
     div.innerHTML = `
       <div style="flex:1"></div>
       <div class="logo">Nitro Circuit<span class="sub">Overdrive</span></div>
-      <div class="tagline">2.5D Arcade Racing — Vertical Slice</div>`;
+      <div class="tagline">2.5D Arcade Racing — Rookie, Street & Overdrive</div>`;
     const list = document.createElement('div');
     list.className = 'menu-list';
     const cupDone = this.profile.cup.finished;
@@ -219,7 +219,8 @@ export class Screens {
       <span><span class="key">L SHIFT</span> boost</span>
       <span><span class="key pink">F</span> missile</span>
       <span><span class="key pink">E</span> mine</span>
-      <span><span class="key">ESC</span> pause</span>`;
+      <span><span class="key">ESC</span> pause</span>
+      <span><span class="key">PAD</span> stick · RT/LT · X · LB/RB · Start</span>`;
     div.appendChild(foot);
     this.root.appendChild(div);
   }
@@ -367,6 +368,7 @@ export class Screens {
       <div class="section-title" style="margin-top:14px">VEHICLE INFO</div>
       <div class="muted" style="font-size:12px;line-height:1.8">
         Condition <span class="${p.condition < 50 ? 'pink' : 'green'}">${Math.round(p.condition)}%</span><br>
+        Body <span class="cyan">${carBodyLabel(car.id)}</span><br>
         Items: ${p.items.missile} missiles · ${p.items.mine} mines
       </div>`;
     grid.appendChild(left);
@@ -511,6 +513,7 @@ export class Screens {
         <div class="swatch" style="background:linear-gradient(150deg, ${hex(c.color)}, #11151f)"></div>
         <div class="spread"><b style="font-style:italic">${c.name}</b>
           <span class="muted" style="font-size:11px">TIER ${c.tier}</span></div>
+        <div class="muted" style="font-size:11px;margin-top:3px;line-height:1.35">${carBodyLabel(c.id)}</div>
         <div style="font-size:12px;margin-top:4px">${
           c.id === p.equipped ? '<span class="cyan">✔ EQUIPPED</span>'
           : owned ? '<span class="green">OWNED — CLICK TO EQUIP</span>'

@@ -377,7 +377,11 @@ class Game {
       this.screens.showPhotoMode(() => this.togglePhotoMode(), () => this.capturePhoto());
     } else {
       this.screens.clear();
-      this.hud.mount(this.race.track.minimap, this.profile.bestTimes[this.raceTrackId] ?? null);
+      this.hud.mount(
+        this.race.track.minimap,
+        this.profile.bestTimes[this.raceTrackId] ?? null,
+        cupAt(this.profile.cup.cupIndex).name,
+      );
     }
   }
 
@@ -540,7 +544,7 @@ class Game {
     this.paused = false;
     this.photo = false;
     this.screens.clear();
-    this.hud.mount(track.minimap, p.bestTimes[trackDef.id] ?? null);
+    this.hud.mount(track.minimap, p.bestTimes[trackDef.id] ?? null, cup.name);
     this.audio.unlock();
     this.audio.stopMusic();
     this.audio.startEngine();
